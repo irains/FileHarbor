@@ -18,11 +18,12 @@ import (
 )
 
 const (
-	CookieName       = "fileharbor_session"
-	LegacyCookieName = "gofile_session"
-	SessionDuration  = 12 * time.Hour
-	TicketDuration   = time.Minute
-	ListingDuration  = 5 * time.Minute
+	CookieName                = "fileharbor_session"
+	LegacyCookieName          = "gofile_session"
+	SessionDuration           = 12 * time.Hour
+	RememberedSessionDuration = 30 * 24 * time.Hour
+	TicketDuration            = time.Minute
+	ListingDuration           = 5 * time.Minute
 
 	maxLoginFailures            = 5
 	loginCooldown               = time.Minute
@@ -222,6 +223,12 @@ func NewManager(config Config) (*Manager, error) {
 
 // Login validates the only configured administrator account and opens a session.
 func (m *Manager) Login(ip, username, password string) (Info, string, time.Time, error) {
+	return m.LoginWithRemember(ip, username, password, false)
+}
+
+// LoginWithRemember changes only the absolute session lifetime, not credential
+// verification, throttling, or server-side revocation.
+func (m *Manager) LoginWithRemember(ip, username, password string, remember bool) (Info, string, time.Time, error) {
 	m.mu.Lock()
 	now := m.now()
 	m.cleanupLocked(now)
@@ -287,7 +294,11 @@ func (m *Manager) Login(ip, username, password string) (Info, string, time.Time,
 	if err != nil {
 		return Info{}, "", time.Time{}, err
 	}
-	expires := now.Add(SessionDuration)
+	duration := SessionDuration
+	if remember {
+		duration = RememberedSessionDuration
+	}
+	expires := now.Add(duration)
 	m.sessions[id] = session{Username: m.config.Username, CSRF: csrf, Expires: expires}
 	return Info{Username: m.config.Username, SessionID: id, CSRF: csrf, Expires: expires}, m.signSessionID(id), expires, nil
 }
@@ -338,6 +349,15 @@ func (m *Manager) Logout(info Info) {
 
 func (m *Manager) Cookie(value string, expires time.Time) *http.Cookie {
 	return m.sessionCookie(CookieName, value, expires, int(SessionDuration.Seconds()))
+}
+
+// LoginCookie keeps ordinary logins browser-session-only. Remembered logins
+// remain revocable server sessions, never credentials stored in the browser.
+func (m *Manager) LoginCookie(value string, expires time.Time, remember bool) *http.Cookie {
+	if !remember {
+		return m.sessionCookie(CookieName, value, time.Time{}, 0)
+	}
+	return m.sessionCookie(CookieName, value, expires, int(RememberedSessionDuration.Seconds()))
 }
 
 func (m *Manager) ExpiredCookie() *http.Cookie {

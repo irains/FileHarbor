@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Alert, Box, Button, Card, CardContent, Stack, TextField, Typography } from '@mui/material';
+import { Alert, Box, Button, Card, CardContent, Checkbox, FormControlLabel, Stack, TextField, Typography } from '@mui/material';
 import { Controller, useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -10,7 +10,7 @@ import { useSession } from '../session/SessionProvider';
 import { Mark } from './Mark';
 import { surface } from '../tokens';
 
-const loginSchema = z.object({ username: z.string().trim().min(1), password: z.string().min(1) });
+const loginSchema = z.object({ username: z.string().trim().min(1), password: z.string().min(1), remember: z.boolean() });
 type LoginValues = z.infer<typeof loginSchema>;
 const loginInputLabelProps = { shrink: true, disableAnimation: true } as const;
 
@@ -20,14 +20,14 @@ export function LoginPage() {
   const [serverError, setServerError] = useState<string | null>(null);
   const { control, handleSubmit, formState: { isSubmitting, errors } } = useForm<LoginValues>({
     resolver: zodResolver(loginSchema),
-    defaultValues: { username: '', password: '' },
+    defaultValues: { username: '', password: '', remember: false },
     mode: 'onBlur',
     reValidateMode: 'onChange'
   });
   const onSubmit = async (values: LoginValues) => {
     setServerError(null);
     try {
-      const session = await api.login(values.username, values.password);
+      const session = await api.login(values.username, values.password, values.remember);
       setSession(session);
       window.location.assign(getRuntime().loginNext);
     } catch (error) {
@@ -38,7 +38,7 @@ export function LoginPage() {
     <Box component="main" sx={{ minHeight: '100dvh', display: 'grid', placeItems: 'center', p: { xs: 2, sm: 4 } }}>
       <Card sx={{ ...surface, width: 'min(100%, 440px)' }}>
         <CardContent sx={{ p: { xs: 3, sm: 5 } }}>
-          <Stack spacing={3} component="form" onSubmit={handleSubmit(onSubmit)} noValidate>
+          <Stack spacing={3} component="form" autoComplete="on" onSubmit={handleSubmit(onSubmit)} noValidate>
             <Stack spacing={1.5}>
               <Box sx={{ lineHeight: 0 }}><Mark size={32} /></Box>
               <Typography component="h1" variant="title">{t('login.title')}</Typography>
@@ -47,6 +47,11 @@ export function LoginPage() {
             {serverError && <Alert severity="error">{serverError}</Alert>}
             <Controller name="username" control={control} render={({ field }) => <TextField {...field} autoComplete="username" autoFocus label={t('login.username')} slotProps={{ inputLabel: loginInputLabelProps }} error={Boolean(errors.username)} helperText={errors.username ? t('login.usernameRequired') : undefined} fullWidth required />} />
             <Controller name="password" control={control} render={({ field }) => <TextField {...field} type="password" autoComplete="current-password" label={t('login.password')} slotProps={{ inputLabel: loginInputLabelProps }} error={Boolean(errors.password)} helperText={errors.password ? t('login.passwordRequired') : undefined} fullWidth required />} />
+            <Stack spacing={0.5}>
+              <Controller name="remember" control={control} render={({ field: { value, ...field } }) => <FormControlLabel control={<Checkbox {...field} checked={value} />} label={t('login.remember')} />} />
+              <Typography variant="caption" color="text.secondary">{t('login.passwordManager')}</Typography>
+              <Typography variant="caption" color="text.secondary">{t('login.rememberHint')}</Typography>
+            </Stack>
             <Button type="submit" size="large" variant="contained" disabled={isSubmitting}>{t('login.signIn')}</Button>
           </Stack>
         </CardContent>

@@ -53,6 +53,26 @@ export function normalizeSession(response: SessionBootstrapResponse): BrowserSes
   };
 }
 
+export interface SizeScan {
+  id: string; path: string; state: 'running' | 'succeeded' | 'failed' | 'cancelled'; code?: string;
+  result?: { bytes: number; files: number; directories: number; scanned_at: string; visited: number; skipped: number; incomplete: boolean; reason?: string };
+}
+
+export interface Favorite {
+  id: string; path: string; label: string; revision: number; created_at: string;
+  availability?: 'available' | 'missing' | 'not_directory' | 'unavailable';
+}
+
+export interface SearchResult {
+  entries: Array<{ name: string; path: string; parent: string; kind: 'file' | 'directory'; size: number; modified: string; version: string }>;
+  visited: number; skipped: number; incomplete: boolean; reason?: string;
+}
+
+export interface ArchivePreview {
+  entries: Array<{ name: string; kind: 'file' | 'directory'; size?: number }>;
+  complete: boolean; truncated: boolean; reason?: string; verification: 'metadata_only'; entries_scanned: number;
+}
+
 export interface Directory { name: string; path: string }
 export interface Properties {
   name: string; path: string; kind: 'file' | 'directory'; extension?: string; size: number;
@@ -214,15 +234,39 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   return response.json() as Promise<T>;
 }
 
+export interface FileJob {
+ id: string; kind: 'copy' | 'compress' | 'extract'; state: string; phase: string;
+ sources: Array<{ path: string; version: string }>; destination: string; name?: string;
+ target: { mode: string; directory?: string; name?: string };
+ bytes: number; items: number; published: string[]; intent?: string; code?: string; cancel_requested: boolean;
+}
+export interface JobRequest {
+ kind: FileJob['kind']; key: string; previous?: string; path?: string; version?: string;
+ destination?: string; name?: string; target?: FileJob['target'];
+ listing_token?: string; entries?: Array<{ name: string; version: string }>;
+}
 export const api = {
-  login: async (username: string, password: string) => normalizeSession(await request<SessionBootstrapResponse>('api/session/login', {
-    method: 'POST', headers: { ...jsonHeaders, 'Content-Type': 'application/json' }, body: JSON.stringify({ username, password })
+ getJobs: () => request<{ ok: true; jobs: FileJob[] }>('api/jobs'),
+ createJob: (body: JobRequest) => request<{ ok: true; job: FileJob }>(body.previous ? `api/jobs/${encodeURIComponent(body.previous)}/retry` : 'api/jobs', { method: 'POST', headers: { ...jsonHeaders, ...csrfHeaders(), 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
+ cancelJob: (id: string) => request<{ ok: true; job: FileJob }>(`api/jobs/${encodeURIComponent(id)}/cancel`, { method: 'POST', headers: csrfHeaders() }),
+  startSizeScan: (path: string, kind: 'directory' | 'trash' = 'directory') => request<{ ok: true; scan: SizeScan }>('api/size-scans', { method: 'POST', headers: { ...jsonHeaders, ...csrfHeaders(), 'Content-Type': 'application/json' }, body: JSON.stringify({ path, kind }) }),
+  getSizeScan: (id: string) => request<{ ok: true; scan: SizeScan }>(`api/size-scans/${encodeURIComponent(id)}`, { headers: jsonHeaders }),
+  cancelSizeScan: (id: string) => request<{ ok: true; scan: SizeScan }>(`api/size-scans/${encodeURIComponent(id)}`, { method: 'DELETE', headers: { ...jsonHeaders, ...csrfHeaders() } }),
+  prepareUploadDirectories: (path: string, directories: string[]) => request<{ ok: true; created: string[] }>('api/uploads/directories', { method: 'POST', headers: { ...jsonHeaders, ...csrfHeaders(), 'Content-Type': 'application/json' }, body: JSON.stringify({ path, directories }) }),
+  getFavorites: () => request<{ ok: true; entries: Favorite[] }>('api/favorites', { headers: jsonHeaders }),
+  addFavorite: (path: string, label: string) => request<{ ok: true; entry: Favorite }>('api/favorites', { method: 'POST', headers: { ...jsonHeaders, ...csrfHeaders(), 'Content-Type': 'application/json' }, body: JSON.stringify({ path, label }) }),
+  renameFavorite: (entry: Favorite, label: string) => request<{ ok: true; entry: Favorite }>(`api/favorites/${encodeURIComponent(entry.id)}`, { method: 'PATCH', headers: { ...jsonHeaders, ...csrfHeaders(), 'Content-Type': 'application/json' }, body: JSON.stringify({ label, revision: entry.revision }) }),
+  removeFavorite: (entry: Favorite) => request<{ ok: true; entry: Favorite }>(`api/favorites/${encodeURIComponent(entry.id)}`, { method: 'DELETE', headers: { ...jsonHeaders, ...csrfHeaders(), 'Content-Type': 'application/json' }, body: JSON.stringify({ revision: entry.revision }) }),
+  search: (parameters: Record<string, string>, signal?: AbortSignal) => request<{ ok: true; result: SearchResult }>(`api/search?${new URLSearchParams(parameters)}`, { headers: jsonHeaders, signal }),
+  previewArchive: (path: string, version: string, signal?: AbortSignal) => request<{ ok: true; preview: ArchivePreview }>(`api/archive/preview?${new URLSearchParams({ path, version })}`, { headers: jsonHeaders, signal }),
+  login: async (username: string, password: string, remember = false) => normalizeSession(await request<SessionBootstrapResponse>('api/session/login', {
+    method: 'POST', headers: { ...jsonHeaders, 'Content-Type': 'application/json' }, body: JSON.stringify({ username, password, remember })
   })),
   getSession: async () => normalizeSession(await request<SessionBootstrapResponse>('api/session', { headers: jsonHeaders })),
   logout: () => request<{ ok: true }>('api/session/logout', { method: 'POST', headers: { ...jsonHeaders, ...csrfHeaders() } }),
   getListing: async (path = '') => normalizeListing(await request<ListingResponse>(`api/listing?path=${encodeURIComponent(path)}`, { headers: jsonHeaders })),
   getDirectories: (path = '') => request<{ ok: true; path: string; dirs: Directory[] }>(`api/directories?path=${encodeURIComponent(path)}`, { headers: jsonHeaders }),
-  getProperties: (path: string) => request<{ ok: true; properties: Properties }>(`api/properties?path=${encodeURIComponent(path)}`, { headers: jsonHeaders }),
+  getProperties: (path: string) => request<{ ok: true; properties: Properties }>(`api/properties?basic=true&path=${encodeURIComponent(path)}`, { headers: jsonHeaders }),
   getTrash: async (cursor?: string) => normalizeTrash(await request<TrashResponse>(`api/trash${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ''}`, { headers: jsonHeaders })),
   restoreTrash: (id: string) => request<{ ok: true; path: string }>(`api/trash/${encodeURIComponent(id)}/restore`, { method: 'POST', headers: { ...csrfHeaders(), ...jsonHeaders } }),
   purgeTrash: (id: string, confirmation: string) => request<{ ok: true }>(`api/trash/${encodeURIComponent(id)}/purge`, { method: 'POST', headers: { ...csrfHeaders(), 'Content-Type': 'application/json', ...jsonHeaders }, body: JSON.stringify({ confirmation }) }),

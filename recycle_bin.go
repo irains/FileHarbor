@@ -69,6 +69,16 @@ type RecycleBin struct {
 	afterCrossDevicePayloadPublished func()
 }
 
+// renameTransfer preserves native no-replace behavior unless a directory is
+// confirmed to cross volumes. Stage publication always uses renameNoReplace.
+func (bin *RecycleBin) renameTransfer(source, destination string, info os.FileInfo) (bool, error) {
+	if info.IsDir() && confirmedTrashCrossVolume(source, destination) {
+		return true, nil
+	}
+	err := bin.renameNoReplace(source, destination)
+	return err != nil && bin.isCrossDeviceError(err), err
+}
+
 func newRecycleBin(state *RuntimeState) (*RecycleBin, error) {
 	if state == nil || state.TrashDir == "" {
 		return nil, errors.New("recycle bin state is unavailable")
@@ -525,7 +535,7 @@ func (bin *RecycleBin) moveResolved(absolute, relative string, info os.FileInfo)
 		}
 	}()
 
-	if err := bin.renameNoReplace(absolute, record.payloadPath); err == nil {
+	if crossVolume, err := bin.renameTransfer(absolute, record.payloadPath, info); !crossVolume && err == nil {
 		record.payloadInfo = info
 		if err := syncDirectories(record.directory, bin.directory, filepath.Dir(absolute)); err != nil {
 			cleanupRecord = false
@@ -533,7 +543,7 @@ func (bin *RecycleBin) moveResolved(absolute, relative string, info os.FileInfo)
 		}
 		cleanupRecord = false
 		return publicTrashEntry(record), nil
-	} else if !bin.isCrossDeviceError(err) {
+	} else if !crossVolume {
 		return TrashEntry{}, normalizeNoReplaceError(err)
 	}
 
@@ -667,7 +677,7 @@ func (bin *RecycleBin) restoreRecord(record trashRecord) (string, error) {
 	} else if !errors.Is(err, fs.ErrNotExist) {
 		return "", errors.New("could not inspect restore destination")
 	}
-	if err := bin.renameNoReplace(record.payloadPath, target); err == nil {
+	if crossVolume, err := bin.renameTransfer(record.payloadPath, target, payloadInfo); !crossVolume && err == nil {
 		if err := os.Remove(record.metadataPath); err != nil {
 			return record.metadata.OriginalPath, utils.ErrExecutionPartial
 		}
@@ -678,7 +688,7 @@ func (bin *RecycleBin) restoreRecord(record trashRecord) (string, error) {
 			return record.metadata.OriginalPath, utils.ErrExecutionPartial
 		}
 		return record.metadata.OriginalPath, nil
-	} else if !bin.isCrossDeviceError(err) {
+	} else if !crossVolume {
 		return "", normalizeNoReplaceError(err)
 	}
 

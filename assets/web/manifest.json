@@ -9,39 +9,39 @@
       "assets/fileharbor-logo-COXRcvQZ.svg"
     ]
   },
-  "_Workspace-C3CZeD0L.js": {
-    "file": "assets/Workspace-C3CZeD0L.js",
+  "_Workspace-ZFI9TZbE.js": {
+    "file": "assets/Workspace-ZFI9TZbE.js",
     "name": "Workspace",
     "isDynamicEntry": true,
     "imports": [
       "index.html",
       "_react-D2EREKHA.js",
-      "_query-BzCdusPr.js",
+      "_mui-RAuQnO5Y.js",
+      "_query-Cq4M-YQb.js",
       "_Mark-BSftdmHg.js",
-      "_mui-DzK_oTi2.js",
-      "_vendor-C9sUiLVG.js",
+      "_vendor-Dg1DhGc3.js",
       "_router-CBUVEgyz.js"
     ],
     "dynamicImports": [
       "src/editor/EditorDialog.tsx"
     ]
   },
-  "_ace-xkrzOl9S.js": {
-    "file": "assets/ace-xkrzOl9S.js",
+  "_ace-Cf4Io_dG.js": {
+    "file": "assets/ace-Cf4Io_dG.js",
     "name": "ace",
     "isDynamicEntry": true,
     "imports": [
       "_react-D2EREKHA.js",
-      "_editor-D9HtRfXC.js"
+      "_editor-jRymcHRq.js"
     ]
   },
-  "_editor-D9HtRfXC.js": {
-    "file": "assets/editor-D9HtRfXC.js",
+  "_editor-jRymcHRq.js": {
+    "file": "assets/editor-jRymcHRq.js",
     "name": "editor",
     "isDynamicEntry": true,
     "imports": [
       "_react-D2EREKHA.js",
-      "_vendor-C9sUiLVG.js"
+      "_vendor-Dg1DhGc3.js"
     ]
   },
   "_mode-css-yc0lA5AH.js": {
@@ -156,20 +156,20 @@
       "_react-D2EREKHA.js"
     ]
   },
-  "_mui-DzK_oTi2.js": {
-    "file": "assets/mui-DzK_oTi2.js",
+  "_mui-RAuQnO5Y.js": {
+    "file": "assets/mui-RAuQnO5Y.js",
     "name": "mui",
     "imports": [
-      "_vendor-C9sUiLVG.js",
+      "_vendor-Dg1DhGc3.js",
       "_react-D2EREKHA.js"
     ]
   },
-  "_query-BzCdusPr.js": {
-    "file": "assets/query-BzCdusPr.js",
+  "_query-Cq4M-YQb.js": {
+    "file": "assets/query-Cq4M-YQb.js",
     "name": "query",
     "imports": [
       "_react-D2EREKHA.js",
-      "_vendor-C9sUiLVG.js"
+      "_vendor-Dg1DhGc3.js"
     ]
   },
   "_react-D2EREKHA.js": {
@@ -199,28 +199,28 @@
       "_react-D2EREKHA.js"
     ]
   },
-  "_vendor-C9sUiLVG.js": {
-    "file": "assets/vendor-C9sUiLVG.js",
+  "_vendor-Dg1DhGc3.js": {
+    "file": "assets/vendor-Dg1DhGc3.js",
     "name": "vendor",
     "imports": [
       "_react-D2EREKHA.js"
     ]
   },
   "index.html": {
-    "file": "assets/index-DKYZwEc2.js",
+    "file": "assets/index-ND5ASlzc.js",
     "name": "index",
     "src": "index.html",
     "isEntry": true,
     "imports": [
       "_react-D2EREKHA.js",
       "_router-CBUVEgyz.js",
-      "_mui-DzK_oTi2.js",
-      "_query-BzCdusPr.js",
-      "_vendor-C9sUiLVG.js"
+      "_mui-RAuQnO5Y.js",
+      "_query-Cq4M-YQb.js",
+      "_vendor-Dg1DhGc3.js"
     ],
     "dynamicImports": [
       "src/components/LoginPage.tsx",
-      "_Workspace-C3CZeD0L.js"
+      "_Workspace-ZFI9TZbE.js"
     ],
     "css": [
       "assets/index-gcHm37fw.css"
@@ -231,38 +231,38 @@
     "src": "src/assets/fileharbor-logo.svg"
   },
   "src/components/LoginPage.tsx": {
-    "file": "assets/LoginPage-D81z3ubO.js",
+    "file": "assets/LoginPage-aW_Rx6Lo.js",
     "name": "LoginPage",
     "src": "src/components/LoginPage.tsx",
     "isDynamicEntry": true,
     "imports": [
       "_react-D2EREKHA.js",
-      "_vendor-C9sUiLVG.js",
+      "_vendor-Dg1DhGc3.js",
       "index.html",
       "_Mark-BSftdmHg.js",
-      "_mui-DzK_oTi2.js",
+      "_mui-RAuQnO5Y.js",
       "_router-CBUVEgyz.js",
-      "_query-BzCdusPr.js"
+      "_query-Cq4M-YQb.js"
     ]
   },
   "src/editor/EditorDialog.tsx": {
-    "file": "assets/EditorDialog-YmlGxMd8.js",
+    "file": "assets/EditorDialog-CHoA1Uja.js",
     "name": "EditorDialog",
     "src": "src/editor/EditorDialog.tsx",
     "isDynamicEntry": true,
     "imports": [
       "index.html",
       "_react-D2EREKHA.js",
-      "_Workspace-C3CZeD0L.js",
-      "_mui-DzK_oTi2.js",
+      "_Workspace-ZFI9TZbE.js",
+      "_mui-RAuQnO5Y.js",
       "_router-CBUVEgyz.js",
-      "_query-BzCdusPr.js",
-      "_vendor-C9sUiLVG.js",
+      "_query-Cq4M-YQb.js",
+      "_vendor-Dg1DhGc3.js",
       "_Mark-BSftdmHg.js"
     ],
     "dynamicImports": [
-      "_ace-xkrzOl9S.js",
-      "_editor-D9HtRfXC.js",
+      "_ace-Cf4Io_dG.js",
+      "_editor-jRymcHRq.js",
       "_theme-github_dark-et-BTlP5.js",
       "_theme-github_light_default-BiZY-jRN.js",
       "_mode-javascript-Dz38zR5g.js",

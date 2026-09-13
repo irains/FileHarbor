@@ -1,20 +1,11 @@
 package utils
 
 import (
-	"errors"
+	"context"
 	"github.com/irains/fileharbor/auth"
-	"io/fs"
-	"os"
 	"path/filepath"
 	"strings"
 )
-
-const (
-	maxPropertyEntries = 100000
-	maxPropertyBytes   = int64(2 << 30)
-)
-
-var errPropertyScanLimit = errors.New("property scan limit reached")
 
 // Properties holds read-only, portable information about a managed item.
 type Properties struct {
@@ -30,6 +21,18 @@ type Properties struct {
 }
 
 func GetProperties(rawPath string) (Properties, error) {
+	return GetPropertiesContext(context.Background(), rawPath)
+}
+
+func GetPropertiesContext(ctx context.Context, rawPath string) (Properties, error) {
+	return propertiesContext(ctx, rawPath, true)
+}
+
+func GetBasicProperties(rawPath string) (Properties, error) {
+	return propertiesContext(context.Background(), rawPath, false)
+}
+
+func propertiesContext(ctx context.Context, rawPath string, recursive bool) (Properties, error) {
 	absolute, rel, _, err := ResolveExisting(rawPath, false)
 	if err != nil {
 		return Properties{}, err
@@ -54,47 +57,17 @@ func GetProperties(rawPath string) (Properties, error) {
 	if !info.IsDir() {
 		return properties, nil
 	}
-	var size int64
-	var count int
-	incomplete := false
-	err = filepath.WalkDir(absolute, func(path string, entry fs.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		if path == absolute {
-			return nil
-		}
-		count++
-		if count > maxPropertyEntries {
-			incomplete = true
-			return errPropertyScanLimit
-		}
-		info, err := entry.Info()
-		if err != nil || info.Mode()&os.ModeSymlink != 0 {
-			incomplete = true
-			return fs.SkipDir
-		}
-		if !info.IsDir() {
-			size += info.Size()
-			if size > maxPropertyBytes {
-				incomplete = true
-				return errPropertyScanLimit
-			}
-		}
-		return nil
-	})
-	if err != nil && !errors.Is(err, errPropertyScanLimit) {
-		return Properties{}, operationError("io_error")
+	if !recursive {
+		properties.Size = 0
+		return properties, nil
 	}
-	if size > maxPropertyBytes {
-		size = maxPropertyBytes
+	result, err := ScanDirectorySize(ctx, rel)
+	if err != nil {
+		return Properties{}, err
 	}
-	properties.Size = size
-	if count > maxPropertyEntries {
-		count = maxPropertyEntries
-	}
-	properties.EntryCount = count
-	properties.Incomplete = incomplete
+	properties.Size = result.Bytes
+	properties.EntryCount = result.Files + result.Directories
+	properties.Incomplete = result.Incomplete
 	return properties, nil
 }
 

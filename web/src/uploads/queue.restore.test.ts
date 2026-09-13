@@ -69,6 +69,25 @@ afterEach(() => {
 });
 
 describe('reliable upload queue restoration', () => {
+  it('reselects equal basenames by full path without creating replacement uploads', async () => {
+    const queue = new ReliableUploadQueue(stored.scope, () => 'docs');
+    queue.restore(['a', 'b'].map(child => ({ ...stored, id: child, path: `docs/root/${child}`, relativePath: `root/${child}/report.txt` })));
+    const attach = vi.spyOn(queue, 'attachFile').mockResolvedValue(true);
+    const file = memoryFile('abc', 'report.txt', 123);
+    expect(await queue.restoreDirectoryFiles([{ file, relativePath: 'root/b/report.txt' }], 'docs')).toBe(true);
+    expect(attach).toHaveBeenCalledWith('b', file);
+    expect(queue.snapshot()).toHaveLength(2);
+    expect(createUpload).not.toHaveBeenCalled();
+    attach.mockRestore();
+  });
+  it('does not create a new upload when a folder reselected source fails identity validation', async () => {
+    const queue = new ReliableUploadQueue(stored.scope, () => 'docs');
+    queue.restore([{ ...stored, path: 'docs/root', relativePath: 'root/report.txt' }]);
+    expect(await queue.restoreDirectoryFiles([{ file: memoryFile('changed', 'report.txt', 123), relativePath: 'root/report.txt' }], 'docs')).toBe(false);
+    expect(queue.snapshot()).toHaveLength(1);
+    expect(createUpload).not.toHaveBeenCalled();
+  });
+
   it('does not turn a new single-file selection into a restored upload attachment', async () => {
     const queue = new ReliableUploadQueue(stored.scope, () => 'docs');
     queue.restore([stored]);

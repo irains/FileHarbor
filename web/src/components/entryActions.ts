@@ -17,6 +17,7 @@ import type { FileEntry } from '../api/client';
 export type EntryActionName =
   | 'download'
   | 'preview'
+  | 'archivePreview'
   | 'edit'
   | 'properties'
   | 'rename'
@@ -36,6 +37,7 @@ export type EntryAction = {
 
 export const entryActions: EntryAction[] = [
   { name: 'download', icon: DownloadOutlined, visible: (entry) => entry.kind === 'file' },
+  { name: 'archivePreview', icon: FolderZipOutlined, visible: (entry) => entry.isArchive },
   { name: 'preview', icon: VisibilityOutlined, visible: (entry) => entry.kind === 'file' && entry.previewable },
   { name: 'edit', icon: EditOutlined, visible: (entry) => entry.kind === 'file' && entry.editable },
   { name: 'properties', icon: InfoOutlined, visible: () => true },
@@ -52,7 +54,7 @@ export function entryMenuActions(entry: FileEntry, mutable: boolean, editorAvail
   return entryActions.filter((item) => {
     if (!item.visible(entry)) return false;
     if (item.name === 'edit') return editorAvailable;
-    if (item.name === 'properties' || item.name === 'download' || item.name === 'preview') return true;
+    if (item.name === 'properties' || item.name === 'download' || item.name === 'preview' || item.name === 'archivePreview') return true;
     return mutable;
   });
 }

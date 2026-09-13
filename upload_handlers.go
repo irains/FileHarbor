@@ -29,6 +29,7 @@ func registerUploadRoutes(protected *gin.RouterGroup, manager *auth.Manager, sta
 
 	mutations := routes.Group("")
 	mutations.Use(mutationAuditMiddleware(state), csrfRequired(manager))
+	mutations.POST("/directories", uploadDirectoriesHandler(state))
 	mutations.POST("", func(c *gin.Context) {
 		setPrivateResponse(c)
 		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 64<<10)

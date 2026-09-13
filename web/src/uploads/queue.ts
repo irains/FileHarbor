@@ -1,3 +1,4 @@
+import type { DirectoryFile } from './directoryEntries';
 import { sha256 } from '@noble/hashes/sha256';
 import { bytesToHex } from '@noble/hashes/utils';
 import { api, ApiError, xhrUploadPart, type UploadStatus } from '../api/client';
@@ -55,6 +56,7 @@ export class ReliableUploadQueue {
       scope: item.scope,
       path: item.path,
       name: item.name,
+      relativePath: item.relativePath,
       size: item.size,
       lastModified: item.lastModified,
       sha256: item.sha256,
@@ -75,20 +77,43 @@ export class ReliableUploadQueue {
   }
 
   add(files: File[]) {
-    for (const file of files) {
-      const now = Date.now();
+    this.addDirectoryFiles(files.map(file => ({ file, relativePath: file.name })), this.destination());
+  }
+
+  addDirectoryFiles(files: DirectoryFile[], destination: string) {
+    for (const { file, relativePath } of files) {
+      const parent = relativePath.split('/').slice(0, -1).join('/');
       const item: QueueItem = {
-        version: 1, id: randomHex(16), token: randomHex(), scope: this.scope, path: this.destination(), name: file.name, size: file.size,
-        lastModified: file.lastModified, sha256: '', createdAt: now, phase: 'waiting', receivedBytes: 0, file, progress: 0
+        version: 1, id: randomHex(16), token: randomHex(), scope: this.scope,
+        path: [destination, parent].filter(Boolean).join('/'), name: file.name, relativePath, size: file.size,
+        lastModified: file.lastModified, sha256: '', createdAt: Date.now(), phase: 'waiting', receivedBytes: 0, file, progress: 0
       };
       this.items.set(item.id, item);
     }
     this.notify(); this.pump();
   }
 
+  async restoreDirectoryFiles(files: DirectoryFile[], destination: string) {
+    const additions: DirectoryFile[] = [];
+    let mismatched = false;
+    for (const selected of files) {
+      const parent = selected.relativePath.split('/').slice(0, -1).join('/');
+      const path = [destination, parent].filter(Boolean).join('/');
+      const matches = this.snapshot().filter(item => item.path === path && item.relativePath === selected.relativePath && item.name === selected.file.name && !['completed', 'cancelled'].includes(item.phase));
+      if (matches.length > 1) { mismatched = true; continue; }
+      const existing = matches[0];
+      if (!existing) { additions.push(selected); continue; }
+      if (existing.file) continue;
+      if (!await this.attachFile(existing.id, selected.file)) mismatched = true;
+    }
+    this.addDirectoryFiles(additions, destination);
+    return !mismatched;
+  }
+
   async attachFile(id: string, file: File) {
     const item = this.items.get(id);
     if (!item || item.name !== file.name || item.size !== file.size || item.lastModified !== file.lastModified) return false;
+    if (file.webkitRelativePath && item.relativePath && file.webkitRelativePath !== item.relativePath) return false;
     this.update(item, { phase: 'hashing', error: undefined });
     const digest = await hashBlob(file);
     if (item.phase === 'cancelled' || item.phase === 'paused') return false;

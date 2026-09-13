@@ -8,10 +8,9 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"sync"
 )
 
-var operationMu sync.Mutex
+var operationMu = newOperationGate()
 
 // WithOperationLock serializes filesystem mutations that share managed sources.
 // Callers must keep the callback small and must not invoke another exported

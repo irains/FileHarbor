@@ -9,6 +9,7 @@ export interface StoredUpload {
   scope: string;
   path: string;
   name: string;
+  relativePath?: string;
   size: number;
   lastModified: number;
   sha256: string;

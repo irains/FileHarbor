@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/irains/fileharbor/utils"
@@ -247,13 +249,20 @@ func (log *AuditLog) Close() error {
 // RuntimeState owns application-private files that must never be reachable
 // through the managed workspace.
 type RuntimeState struct {
-	Dir        string
-	ChunksDir  string
-	TempDir    string
-	UploadsDir string
-	TrashDir   string
-	Audit      *AuditLog
-	lock       *stateLock
+	jobsMu         sync.Mutex
+	Jobs           *JobManager
+	scanGeneration atomic.Uint64
+	scanContext    context.Context
+	scanCancel     context.CancelFunc
+	scanWorkers    sync.WaitGroup
+	ManagedRoot    string
+	Dir            string
+	ChunksDir      string
+	TempDir        string
+	UploadsDir     string
+	TrashDir       string
+	Audit          *AuditLog
+	lock           *stateLock
 
 	mu      sync.RWMutex
 	chunkMu sync.Mutex
@@ -336,7 +345,8 @@ func OpenRuntimeState(configuredDir, managedRoot string) (*RuntimeState, error) 
 	if err != nil {
 		return nil, err
 	}
-	state := &RuntimeState{Dir: statePath, ChunksDir: chunksDir, TempDir: tempDir, UploadsDir: uploadsDir, TrashDir: trashDir, Audit: audit, lock: lock}
+	state := &RuntimeState{ManagedRoot: root, Dir: statePath, ChunksDir: chunksDir, TempDir: tempDir, UploadsDir: uploadsDir, TrashDir: trashDir, Audit: audit, lock: lock}
+	state.scanContext, state.scanCancel = context.WithCancel(context.Background())
 	closeLock = false
 	return state, nil
 }
@@ -452,6 +462,10 @@ func (state *RuntimeState) Ready() bool {
 }
 
 func (state *RuntimeState) Record(event AuditEvent) error {
+	if state != nil && event.Outcome != "attempted" {
+		state.scanGeneration.Add(1)
+	}
+
 	if state == nil || state.Audit == nil {
 		return errors.New("audit log unavailable")
 	}
@@ -468,11 +482,32 @@ func (state *RuntimeState) Record(event AuditEvent) error {
 	return nil
 }
 
+func (state *RuntimeState) startScan() bool {
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if state.scanContext == nil || state.scanContext.Err() != nil {
+		return false
+	}
+	state.scanWorkers.Add(1)
+	return true
+}
+
 func (state *RuntimeState) Close() error {
 	if state == nil {
 		return nil
 	}
 	state.SetReady(false)
+	state.mu.Lock()
+	if state.scanCancel != nil {
+		state.scanCancel()
+	}
+	state.mu.Unlock()
+	state.scanWorkers.Wait()
+	state.jobsMu.Lock()
+	if state.Jobs != nil {
+		state.Jobs.stop()
+	}
+	state.jobsMu.Unlock()
 	var auditErr error
 	if state.Audit != nil {
 		auditErr = state.Audit.Close()

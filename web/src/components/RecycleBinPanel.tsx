@@ -7,6 +7,7 @@ import { formatBytes } from '../formatBytes';
 import { useI18n } from '../i18n';
 import { DialogShell } from './DialogShell';
 import { EmptyState } from './EmptyState';
+import { DirectorySize } from './DirectorySize';
 import { SidePanel } from './SidePanel';
 
 type PendingPurge = { type: 'entry'; entry: TrashEntry } | { type: 'empty' } | null;
@@ -101,6 +102,7 @@ export function RecycleBinPanel({
       trailing={mutable && displayedEntries.length > 0 ? <Button size="small" color="error" onClick={() => setPendingPurge({ type: 'empty' })}>{t('action.emptyRecycleBin')}</Button> : undefined}
     >
       <Stack spacing={2}>
+        {open && <DirectorySize path="" kind="trash" />}
         {trashQuery.isLoading && displayedEntries.length === 0 ? <Typography color="text.secondary">{t('recycleBin.loading')}</Typography> : null}
         {trashQuery.isError && displayedEntries.length === 0 ? <Alert severity="error">{trashQuery.error instanceof ApiError ? t(`error.${trashQuery.error.code}`) : t('error.generic')}</Alert> : null}
         {!trashQuery.isLoading && !trashQuery.isError && displayedEntries.length === 0 ? <EmptyState icon={<DeleteOutline />} title={t('recycleBin.emptyTitle')} caption={t('recycleBin.emptyHint')} /> : null}

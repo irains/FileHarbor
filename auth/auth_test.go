@@ -462,3 +462,57 @@ func TestArchiveTicketIsSessionBoundAndOneUse(t *testing.T) {
 		t.Fatal("ticket must be one-use")
 	}
 }
+
+func TestRememberedSessionLifetimeAndRevocation(t *testing.T) {
+	for _, remember := range []bool{false, true} {
+		manager, err := NewManager(testConfig(t))
+		if err != nil {
+			t.Fatal(err)
+		}
+		now := time.Now().Truncate(time.Second)
+		manager.now = func() time.Time { return now }
+		info, signed, expiry, err := manager.LoginWithRemember("127.0.0.1", "admin", testPassword, remember)
+		if err != nil {
+			t.Fatal(err)
+		}
+		duration := SessionDuration
+		if remember {
+			duration = RememberedSessionDuration
+		}
+		if !expiry.Equal(now.Add(duration)) {
+			t.Fatal("unexpected absolute expiry")
+		}
+		cookie := manager.LoginCookie(signed, expiry, remember)
+		if !cookie.HttpOnly || cookie.SameSite != http.SameSiteStrictMode {
+			t.Fatal("cookie protections missing")
+		}
+		if remember {
+			if cookie.MaxAge != int(duration.Seconds()) || !cookie.Expires.Equal(expiry) {
+				t.Fatal("persistent cookie expiry mismatch")
+			}
+		} else if cookie.MaxAge != 0 || !cookie.Expires.IsZero() {
+			t.Fatal("ordinary cookie persisted")
+		}
+		request, _ := http.NewRequest(http.MethodGet, "/", nil)
+		request.AddCookie(cookie)
+		now = expiry.Add(-time.Second)
+		if _, ok := manager.SessionFromRequest(request); !ok {
+			t.Fatal("session expired early")
+		}
+		now = expiry
+		if _, ok := manager.SessionFromRequest(request); ok {
+			t.Fatal("expired session accepted")
+		}
+		now = expiry.Add(time.Second)
+		info, signed, expiry, err = manager.LoginWithRemember("127.0.0.1", "admin", testPassword, remember)
+		if err != nil {
+			t.Fatal(err)
+		}
+		request, _ = http.NewRequest(http.MethodGet, "/", nil)
+		request.AddCookie(manager.LoginCookie(signed, expiry, remember))
+		manager.Logout(info)
+		if _, ok := manager.SessionFromRequest(request); ok {
+			t.Fatal("logout did not revoke session")
+		}
+	}
+}

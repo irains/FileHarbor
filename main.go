@@ -605,7 +605,8 @@ func newRouter(manager *auth.Manager, state *RuntimeState) *gin.Engine {
 		setPrivateResponse(c)
 		username := c.PostForm("username")
 		password := c.PostForm("password")
-		info, signedID, expiry, err := manager.Login(c.ClientIP(), username, password)
+		remember := c.PostForm("remember") == "true" || c.PostForm("remember") == "on"
+		info, signedID, expiry, err := manager.LoginWithRemember(c.ClientIP(), username, password, remember)
 		if err != nil {
 			outcome := "failure"
 			if errors.Is(err, auth.ErrRateLimited) {
@@ -634,7 +635,7 @@ func newRouter(manager *auth.Manager, state *RuntimeState) *gin.Engine {
 			return
 		}
 		_ = state.Record(AuditEvent{Event: "auth.login", Outcome: "success", Principal: info.Username, AuthMethod: "session", ClientIP: c.ClientIP()})
-		http.SetCookie(c.Writer, manager.Cookie(signedID, expiry))
+		http.SetCookie(c.Writer, manager.LoginCookie(signedID, expiry, remember))
 		http.SetCookie(c.Writer, manager.ExpiredLegacyCookie())
 		c.Redirect(http.StatusFound, safeNextPath(c.PostForm("next")))
 	})
@@ -648,6 +649,9 @@ func newRouter(manager *auth.Manager, state *RuntimeState) *gin.Engine {
 
 	protected := router.Group("/")
 	protected.Use(authRequired(manager))
+	registerFavoriteRoutes(protected, manager, state)
+	registerSizeRoutes(protected, manager, state)
+	registerJobRoutes(protected, manager, state)
 	protected.GET("/", func(c *gin.Context) { renderDirectory(c, state, "") })
 	protected.GET("/edit/*path", func(c *gin.Context) {
 		file, err := utils.ReadTextFile(pathFromParam(c.Param("path")), maxEditorBytes)
@@ -760,6 +764,8 @@ func newRouter(manager *auth.Manager, state *RuntimeState) *gin.Engine {
 		}
 		c.JSON(http.StatusOK, gin.H{"ok": true, "path": cleanPath, "dirs": directories})
 	})
+	protected.GET("/api/search", searchHandler)
+	protected.GET("/api/archive/preview", archivePreviewHandler)
 	protected.GET("/api/properties", func(c *gin.Context) {
 		if authInfo(c).Bearer {
 			setPrivateResponse(c)
@@ -767,7 +773,18 @@ func newRouter(manager *auth.Manager, state *RuntimeState) *gin.Engine {
 			return
 		}
 		setPrivateResponse(c)
-		properties, err := utils.GetProperties(c.Query("path"))
+		release, ok := beginReadScan(c)
+		if !ok {
+			return
+		}
+		defer release()
+		var properties utils.Properties
+		var err error
+		if c.Query("basic") == "true" {
+			properties, err = utils.GetBasicProperties(c.Query("path"))
+		} else {
+			properties, err = utils.GetPropertiesContext(c.Request.Context(), c.Query("path"))
+		}
 		if err != nil {
 			jsonError(c, operationStatus(err), err)
 			return
@@ -1439,6 +1456,9 @@ func web(ctx context.Context, manager *auth.Manager, state *RuntimeState) error 
 		IdleTimeout:       60 * time.Second,
 		MaxHeaderBytes:    1 << 20,
 	}
+	if state.Jobs == nil {
+		return errors.New("file task storage unavailable")
+	}
 	state.SetReady(true)
 	if uploads != nil && uploads.state == state {
 		uploads.StartReaper(ctx.Done())
@@ -1461,6 +1481,9 @@ func web(ctx context.Context, manager *auth.Manager, state *RuntimeState) error 
 	case <-ctx.Done():
 		state.SetReady(false)
 		gate.StopAdmission()
+		if state.Jobs != nil {
+			state.Jobs.cancel()
+		}
 		_ = state.Record(AuditEvent{Event: "server.shutdown_requested", Outcome: "success"})
 		deadline := time.Now().Add(shutdownTimeout())
 		shutdownCtx, cancel := context.WithDeadline(context.Background(), deadline)

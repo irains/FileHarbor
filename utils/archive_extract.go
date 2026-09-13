@@ -52,10 +52,29 @@ func ExtractArchive(rawPath string) (string, error) {
 // filesystem, and completed top-level entries are published without replacing
 // existing data.
 func ExtractArchiveContext(ctx context.Context, rawPath string) (string, error) {
+	return ExtractArchiveTargetContext(ctx, rawPath, ExtractionTarget{})
+}
+
+// ExtractionTarget distinguishes legacy omission from an explicit managed root.
+type ExtractionTarget struct {
+	Mode      string `json:"mode"`
+	Directory string `json:"directory,omitempty"`
+	Name      string `json:"name,omitempty"`
+}
+
+// ExtractArchiveTargetContext stages on the selected output filesystem. The
+// compatibility result remains the source path; callers know their target mode.
+func ExtractArchiveTargetContext(ctx context.Context, rawPath string, target ExtractionTarget) (string, error) {
+	return ExtractArchiveVersionContext(ctx, rawPath, target, "")
+}
+
+func ExtractArchiveVersionContext(ctx context.Context, rawPath string, target ExtractionTarget, expectedVersion string) (string, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	operationMu.Lock()
+	if err := operationMu.LockContext(ctx); err != nil {
+		return "", contextOperationError(ctx)
+	}
 	defer operationMu.Unlock()
 	if err := contextOperationError(ctx); err != nil {
 		return "", err
@@ -64,6 +83,9 @@ func ExtractArchiveContext(ctx context.Context, rawPath string) (string, error) 
 	absolute, relative, resolvedInfo, err := ResolveExisting(rawPath, false)
 	if err != nil {
 		return "", err
+	}
+	if expectedVersion != "" && versionFor(resolvedInfo) != expectedVersion {
+		return "", ErrSourceChanged
 	}
 	if !resolvedInfo.Mode().IsRegular() {
 		return "", ErrUnsupportedType
@@ -100,12 +122,58 @@ func ExtractArchiveContext(ctx context.Context, rawPath string) (string, error) 
 		return "", err
 	}
 
-	outputDir := filepath.Dir(absolute)
-	stage, err := os.MkdirTemp(outputDir, InternalArchiveExtractPrefix)
+	outputRelative := path.Dir(relative)
+	if outputRelative == "." {
+		outputRelative = ""
+	}
+	newFolder := ""
+	switch target.Mode {
+	case "", "current":
+		if target.Directory != "" || target.Name != "" {
+			return "", ErrInvalidPath
+		}
+	case "chosen":
+		if target.Name != "" {
+			return "", ErrInvalidPath
+		}
+		outputRelative = target.Directory
+	case "new_folder":
+		if target.Directory != "" {
+			return "", ErrInvalidPath
+		}
+		newFolder = target.Name
+		if newFolder == "" {
+			newFolder = strings.TrimSuffix(filepath.Base(relative), suffix)
+		}
+		if ValidateLeafName(newFolder) != nil {
+			return "", ErrInvalidName
+		}
+	default:
+		return "", ErrInvalidPath
+	}
+	outputParent, outputRelative, outputInfo, err := ResolveDirectory(outputRelative, true)
+	if err != nil {
+		return "", err
+	}
+	outputDir := outputParent
+	if newFolder != "" {
+		if err := preflightPromotionTargets(outputParent, []string{newFolder}); err != nil {
+			return "", err
+		}
+		outputDir = filepath.Join(outputParent, newFolder)
+	}
+	stage, err := os.MkdirTemp(outputParent, InternalArchiveExtractPrefix)
 	if err != nil {
 		return "", operationError("io_error")
 	}
-	defer os.RemoveAll(stage)
+	stageInfo, err := os.Lstat(stage)
+	if err != nil {
+		return "", operationError("io_error")
+	}
+	defer cleanupOperationStage(ctx, stage, path.Join(outputRelative, filepath.Base(stage)), stageInfo)
+	if err := observeOperation(ctx, OperationEvent{Phase: "staging", Path: path.Join(outputRelative, filepath.Base(stage))}); err != nil {
+		return "", err
+	}
 
 	var tops []string
 	switch format {
@@ -147,8 +215,58 @@ func ExtractArchiveContext(ctx context.Context, rawPath string) (string, error) 
 	if err := contextOperationError(ctx); err != nil {
 		return "", err
 	}
+	currentParent, _, currentInfo, err := ResolveDirectory(outputRelative, true)
+	if err != nil || currentParent != outputParent || !os.SameFile(outputInfo, currentInfo) {
+		return "", ErrSourceChanged
+	}
+	if newFolder != "" {
+		if err := preflightPromotionTargets(outputParent, []string{newFolder}); err != nil {
+			return "", err
+		}
+		publishedPath := path.Join(outputRelative, newFolder)
+		if err := observeOperation(ctx, OperationEvent{Phase: "publish_intent", Path: publishedPath}); err != nil {
+			return "", err
+		}
+		if err := renameNoReplace(stage, outputDir); err != nil {
+			if destinationAlreadyExists(outputDir) {
+				return "", ErrDestinationExists
+			}
+			return "", operationError("io_error")
+		}
+		if err := syncOperationDirectory(outputParent); err != nil {
+			return "", operationError("execution_partial")
+		}
+		if err := observeOperation(ctx, OperationEvent{Phase: "published", Path: publishedPath}); err != nil {
+			return "", operationError("execution_partial")
+		}
+		return relative, nil
+	}
 	if err := preflightPromotionTargets(outputDir, tops); err != nil {
 		return "", err
+	}
+	if hasOperationObserver(ctx) {
+		for _, top := range tops {
+			if err := contextOperationError(ctx); err != nil {
+				return "", err
+			}
+			publishedPath := path.Join(outputRelative, top)
+			if err := observeOperation(ctx, OperationEvent{Phase: "publish_intent", Path: publishedPath}); err != nil {
+				return "", err
+			}
+			if err := renameNoReplace(filepath.Join(stage, top), filepath.Join(outputDir, top)); err != nil {
+				if destinationAlreadyExists(filepath.Join(outputDir, top)) {
+					return "", ErrDestinationExists
+				}
+				return "", operationError("io_error")
+			}
+			if err := syncOperationDirectory(outputParent); err != nil {
+				return "", operationError("execution_partial")
+			}
+			if err := observeOperation(ctx, OperationEvent{Phase: "published", Path: publishedPath}); err != nil {
+				return "", operationError("execution_partial")
+			}
+		}
+		return relative, nil
 	}
 	if err := promoteExtractionStage(stage, outputDir, tops); err != nil {
 		return "", err
@@ -676,6 +794,9 @@ func copyArchivePayload(ctx context.Context, destination *os.File, source io.Rea
 			}
 			registry.bytes += int64(n)
 			written += int64(n)
+			if err := observeOperation(ctx, OperationEvent{Phase: "writing", Bytes: int64(n)}); err != nil {
+				return err
+			}
 		}
 		if readErr != nil {
 			if errors.Is(readErr, io.EOF) {
@@ -690,10 +811,13 @@ func copyArchivePayload(ctx context.Context, destination *os.File, source io.Rea
 	if expected >= 0 && written != expected {
 		return ErrCorruptArchive
 	}
-	return nil
+	return observeOperation(ctx, OperationEvent{Phase: "writing", Items: 1})
 }
 
 func closeArchiveFile(file *os.File, mode fs.FileMode, prior error) error {
+	if prior == nil {
+		prior = file.Sync()
+	}
 	closeErr := file.Close()
 	if prior != nil {
 		return prior

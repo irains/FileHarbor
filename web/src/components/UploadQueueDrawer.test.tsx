@@ -31,7 +31,7 @@ describe('UploadQueueDrawer', () => {
   it('exposes a keyboard-operable drop zone that opens the file picker', () => {
     snapshot.mockReturnValue([]);
     renderDrawer();
-    const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+    const input = document.querySelector('input[type="file"]:not([webkitdirectory])') as HTMLInputElement;
     expect(input).toBeTruthy();
     const click = vi.spyOn(input, 'click');
     const dropZone = screen.getByRole('button', { name: 'Drop files here or choose files to upload' });

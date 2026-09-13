@@ -324,3 +324,85 @@ test('mobile workspace moves and restores files with compact recycle-bin control
   const metrics = await page.locator('body').evaluate((body) => ({ scrollWidth: body.scrollWidth, clientWidth: body.clientWidth }));
   expect(metrics.scrollWidth).toBe(metrics.clientWidth);
 });
+
+for (const width of [320, 390, 768, 1280]) {
+  for (const language of ['en', 'zh'] as const) {
+    test(`selection clear control stays with the count at ${width}px in ${language}`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 1000 });
+      await mockWorkspaceApi(page);
+      await page.goto('/');
+      if (language === 'zh') {
+        await page.getByRole('button', { name: 'Settings', exact: true }).click();
+        await page.getByRole('radio', { name: '简体中文', exact: true }).click();
+        await page.getByRole('button', { name: '关闭', exact: true }).click();
+      }
+      const itemCheckbox = page.locator('input[type="checkbox"]').nth(1);
+      await itemCheckbox.check();
+      const selectedText = language === 'zh' ? '已选择 1 项' : '1 selected';
+      const clearLabel = language === 'zh' ? '取消选中' : 'Clear selection';
+      const selection = page.getByRole('region', { name: selectedText, exact: true });
+      const count = selection.getByText(selectedText, { exact: true });
+      const clear = selection.getByRole('button', { name: clearLabel, exact: true });
+      const move = selection.getByRole('button', { name: language === 'zh' ? '移动' : 'Move', exact: true });
+      await expect(clear).toBeVisible();
+      await expect(clear).toHaveClass(/MuiButton-colorInherit/);
+      const countBox = await count.boundingBox();
+      const clearBox = await clear.boundingBox();
+      const moveBox = await move.boundingBox();
+      expect(countBox).not.toBeNull();
+      expect(clearBox).not.toBeNull();
+      expect(moveBox).not.toBeNull();
+      expect(clearBox!.x).toBeGreaterThanOrEqual(countBox!.x + countBox!.width);
+      expect(Math.abs(clearBox!.y + clearBox!.height / 2 - countBox!.y - countBox!.height / 2)).toBeLessThan(2);
+      expect(moveBox!.y).toBeGreaterThanOrEqual(clearBox!.y + clearBox!.height);
+      if (width < 600) {
+        expect(clearBox!.height).toBeGreaterThanOrEqual(44);
+        await expect(move.locator('xpath=..')).toHaveCSS('display', 'grid');
+        await expect(move.locator('xpath=..')).toHaveCSS('grid-template-columns', /px.*px/);
+      }
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+      const mutations: string[] = [];
+      page.on('request', request => { if (request.method() !== 'GET') mutations.push(request.method()); });
+      await clear.click();
+      await expect(selection).toHaveCount(0);
+      await expect(itemCheckbox).not.toBeChecked();
+      await expect(page.locator('input[type="checkbox"]').first()).not.toBeChecked();
+      await expect(page.getByRole('button', { name: 'sample.txt', exact: true })).toBeVisible();
+      await itemCheckbox.check();
+      await clear.focus();
+      await page.keyboard.press('Enter');
+      await expect(selection).toHaveCount(0);
+      await expect(itemCheckbox).not.toBeChecked();
+      expect(mutations).toEqual([]);
+    });
+  }
+}
+
+for (const locale of ['en', 'zh']) for (const scheme of ['light', 'dark'] as const) for (const width of [320, 390, 768, 1280]) {
+  test(`file tasks stay usable at ${width}px ${locale} ${scheme}`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 });
+    await mockWorkspaceApi(page);
+    await page.emulateMedia({ colorScheme: scheme });
+    await page.route('**/api/jobs', route => route.fulfill({ json: { ok: true, jobs: [{
+      id: 'synthetic-task', kind: 'copy', state: 'partial', phase: 'writing', sources: [{ path: 'Documents/long-source-name.txt', version: 'v1' }],
+      destination: 'Documents/Reports', target: { mode: '' }, bytes: 1024, items: 1, published: ['Documents/Reports/file.txt'], intent: 'Documents/Reports/uncertain.txt', cancel_requested: false
+    }] } }));
+    await page.goto('/');
+    const chinese = locale === 'zh';
+    if(chinese){
+      await page.getByRole('button', { name: 'Settings', exact: true }).click();
+      await page.getByRole('radio', { name: '简体中文' }).click();
+      await page.getByRole('button', { name: '关闭', exact: true }).click();
+    }
+    await page.getByRole('button', { name: chinese ? '文件任务' : 'File tasks', exact: true }).click();
+    const panel = page.locator('.MuiDrawer-paper').filter({ has: page.getByRole('heading', { name: chinese ? '文件任务' : 'File tasks' }) });
+    await expect(panel.getByText(chinese ? /发布结果不确定/ : /Publication outcome is uncertain/)).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    const retry = panel.getByRole('button', { name: chinese ? '重试' : 'Retry', exact: true });
+    expect((await retry.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+    await retry.focus(); await page.keyboard.press('Enter');
+    await expect(panel.getByText(chinese ? /已有输出保留/ : /Existing outputs remain/)).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(panel).toHaveCount(0);
+  });
+}

@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Add, CancelOutlined, DeleteOutline, Pause, PlayArrow, UploadFile } from '@mui/icons-material';
 import { Alert, Box, Button, IconButton, LinearProgress, List, ListItem, ListItemIcon, ListItemText, Stack, Typography } from '@mui/material';
+import { api, ApiError } from '../api/client';
+import { filesWithDirectories, droppedDirectories, pickDirectory, supportsDirectoryPicker, type DirectorySelection } from '../uploads/directoryEntries';
 import { getRuntime } from '../runtime';
 import { useI18n } from '../i18n';
 import { ReliableUploadQueue, type QueueItem } from '../uploads/queue';
@@ -16,6 +18,10 @@ function labelFor(phase: QueueItem['phase'], t: (key: string) => string) {
 export function UploadQueueDrawer({ open, onClose, destination, username, onAllComplete }: { open: boolean; onClose: () => void; destination: string; username: string; onAllComplete: (destinationPaths: string[]) => void }) {
   const { t } = useI18n();
   const runtime = getRuntime();
+  const enumeration = useRef<AbortController | null>(null);
+  useEffect(() => () => enumeration.current?.abort(), []);
+  const directoryInput = useRef<HTMLInputElement>(null);
+  const [preparing, setPreparing] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
   const destinationRef = useRef(destination);
   destinationRef.current = destination;
@@ -60,10 +66,44 @@ export function UploadQueueDrawer({ open, onClose, destination, username, onAllC
     setAttachmentID(null);
     queue.add([...files]);
   };
+  const addDirectorySelection = async (selection: DirectorySelection, target: string) => {
+    setPreparing(true); setAttachmentError(null);
+    try {
+      if (selection.directories.length) await api.prepareUploadDirectories(target, selection.directories);
+      if (!await queue.restoreDirectoryFiles(selection.files, target)) setAttachmentError(t('upload.sourceChanged'));
+      if (!selection.files.length) onAllComplete([target]);
+    } catch (error) { setAttachmentError(error instanceof ApiError ? t(`error.${error.code}`) : t('error.generic')); }
+    finally { setPreparing(false); }
+  };
+  const chooseDirectory = async () => {
+    if (!supportsDirectoryPicker()) { directoryInput.current?.click(); return; }
+    if (enumeration.current) return;
+    const controller = new AbortController();
+    enumeration.current = controller;
+    const target = destinationRef.current;
+    setPreparing(true); setAttachmentError(null);
+    try {
+      const selection = await pickDirectory(controller.signal);
+      controller.signal.throwIfAborted();
+      await addDirectorySelection(selection, target);
+    } catch (error) {
+      if (!controller.signal.aborted && !(error instanceof DOMException && error.name === 'AbortError')) setAttachmentError(t('error.generic'));
+    } finally { enumeration.current = null; setPreparing(false); }
+  };
   const selectFiles = () => openFilePicker();
   return (
     <SidePanel open={open} onClose={onClose} icon={<UploadFile />} title={t('upload.title')}>
       <Stack spacing={1.5} sx={{ height: '100%' }}>
+        <input ref={directoryInput} type="file" hidden multiple {...{ webkitdirectory: '' }} onChange={(event) => {
+          const files = Array.from(event.target.files || []);
+          event.currentTarget.value = '';
+          try { void addDirectorySelection(filesWithDirectories(files), destinationRef.current); }
+          catch { setAttachmentError(t('error.invalid_path')); }
+        }} />
+        <Button variant="outlined" disabled={preparing} onClick={() => void chooseDirectory()}>{t('folderUpload.choose')}</Button>
+        <Typography variant="caption" color="text.secondary">{t('folderUpload.hint')}</Typography>
+        {preparing && <LinearProgress aria-label={t('folderUpload.preparing')} />}
+        {preparing && enumeration.current && <Button onClick={() => enumeration.current?.abort()}>{t('action.cancel')}</Button>}
         <input ref={fileInput} type="file" hidden multiple={!attachmentID} onChange={(event) => { handleFiles(event.target.files); event.currentTarget.value = ''; }} />
         <Button variant="contained" startIcon={<Add />} onClick={selectFiles}>{t('upload.addFiles')}</Button>
         <Box
@@ -73,7 +113,7 @@ export function UploadQueueDrawer({ open, onClose, destination, username, onAllC
           onClick={selectFiles}
           onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); selectFiles(); } }}
           onDragOver={(event) => event.preventDefault()}
-          onDrop={(event) => { event.preventDefault(); setAttachmentID(null); handleFiles(event.dataTransfer.files); }}
+          onDrop={(event) => { event.preventDefault(); if (preparing) return; setAttachmentID(null); const target = destinationRef.current; if (!event.dataTransfer.items?.length) { handleFiles(event.dataTransfer.files); return; } setPreparing(true); void droppedDirectories(event.dataTransfer.items).then(selection => addDirectorySelection(selection, target)).catch(() => setAttachmentError(t('error.invalid_path'))).finally(() => setPreparing(false)); }}
           sx={{ border: '1px dashed', borderColor: 'divider', borderRadius: radii.sm, px: 2, py: 1.5, color: 'text.secondary', cursor: 'pointer', textAlign: 'center', '&:hover': { borderColor: 'primary.main', bgcolor: 'action.hover' } }}
         >
           <Typography variant="caption">{t('workspace.dropZone')}</Typography>
@@ -120,7 +160,7 @@ function UploadRow({ item, queue, t, onAttach }: { item: QueueItem; queue: Relia
         <UploadFile color={item.phase === 'failed' ? 'error' : item.phase === 'completed' ? 'success' : 'action'} />
       </ListItemIcon>
       <ListItemText
-        primary={<Typography noWrap>{item.name}</Typography>}
+        primary={<Typography title={[item.path, item.name].filter(Boolean).join('/')} sx={{ overflowWrap: 'anywhere' }}>{item.relativePath || item.name}</Typography>}
         secondaryTypographyProps={{ component: 'div' }}
         secondary={
           <Stack spacing={0.5}>

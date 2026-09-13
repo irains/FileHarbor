@@ -1,7 +1,10 @@
+import { useTasks } from '../tasks/TaskProvider';
+import { ExtractArchiveDialog } from './ExtractArchiveDialog';
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   Add,
   Archive,
+  Close,
   ContentCopy,
   CreateNewFolder,
   DeleteOutline,
@@ -62,6 +65,10 @@ import { EmptyState } from './EmptyState';
 import { UploadQueueDrawer } from './UploadQueueDrawer';
 import { SettingsPanel } from './SettingsPanel';
 import { RecycleBinPanel } from './RecycleBinPanel';
+import { DirectorySize } from './DirectorySize';
+import { FavoritesPanel } from './FavoritesPanel';
+import { SearchPanel } from './SearchPanel';
+import { ArchivePreviewPanel } from './ArchivePreviewPanel';
 import { entryMenuActions, hoverActionNames, type EntryAction, type EntryActionName } from './entryActions';
 import { formatBytes } from '../formatBytes';
 import { FolderDestinationPicker } from './FolderDestinationPicker';
@@ -234,6 +241,9 @@ export function Workspace() {
   const [menuEntry, setMenuEntry] = useState<FileEntry | null>(null);
   const [menuAnchor, setMenuAnchor] = useState<HTMLElement | null>(null);
   const [form, setForm] = useState<FormState>(null);
+  const tasks = useTasks();
+  const [extractFor, setExtractFor] = useState<FileEntry | null>(null);
+  const [archivePreviewFor, setArchivePreviewFor] = useState<FileEntry | null>(null);
   const [propertiesFor, setPropertiesFor] = useState<FileEntry | null>(null);
   const [showUploads, setShowUploads] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -241,6 +251,8 @@ export function Workspace() {
   const [notice, setNotice] = useState<{ message: string; severity: AlertColor } | null>(null);
   const [manualRefresh, setManualRefresh] = useState(false);
   const [refreshError, setRefreshError] = useState<string | null>(null);
+  const [favoritesOpen, setFavoritesOpen] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [kindFilter, setKindFilter] = useState<ListingKindFilter>('all');
   const [listingSort, setListingSort] = useState<ListingSort>('folders-first');
@@ -316,15 +328,19 @@ export function Workspace() {
   useEffect(() => {
     if (previousPath.current === currentPath) return;
     previousPath.current = currentPath;
+    setExtractFor(null);
     setSelected(new Set());
     setMenuEntry(null);
     setMenuAnchor(null);
     setForm(null);
     setPropertiesFor(null);
+    setArchivePreviewFor(null);
     setPendingDelete(null);
     setManualRefresh(false);
     setRefreshError(null);
     setSearchQuery('');
+    setSearchOpen(false);
+    setFavoritesOpen(false);
     setKindFilter('all');
     setListingSort('folders-first');
   }, [currentPath]);
@@ -350,10 +366,14 @@ export function Workspace() {
   const batchBody = (destination?: string) => ({ listing_token: listing?.listingToken, entries: selectedEntries.map(({ name, version }) => ({ name, version })), ...(destination !== undefined ? { destination } : {}) });
   const affectedDirectories = (destination?: string) => [...new Set([currentPath, ...(destination === undefined ? [] : [destination])])];
   const doBatch = (endpoint: string, destination?: string) => {
+    if (endpoint === 'do/batch/copy' && tasks && listing?.listingToken) { void tasks.submit({ kind: 'copy', ...batchBody(destination) }).catch(error => setNotice({ message: error instanceof ApiError ? t(`error.${error.code}`) : t('error.generic'), severity: 'error' })); return; }
     if (listing?.listingToken && selectedEntries.length) batch.mutate({ endpoint, body: batchBody(destination), affectedDirectories: affectedDirectories(destination) });
   };
   const performEntryAction = (action: EntryActionName, entry: FileEntry) => {
     setMenuEntry(null); setMenuAnchor(null);
+    if (action === 'extract') return setExtractFor(entry);
+    if (action === 'archive' && tasks) { void tasks.submit({ kind: 'compress', path: entry.path, version: entry.version }).catch(error => setNotice({ message: error instanceof ApiError ? t(`error.${error.code}`) : t('error.generic'), severity: 'error' })); return; }
+    if (action === 'archivePreview') return setArchivePreviewFor(entry);
     if (action === 'properties') return setPropertiesFor(entry);
     if (action === 'edit') return navigate(editorRoute(entry.path), { state: { editorOrigin: location.pathname } });
     if (action === 'download') return window.location.assign(itemUrl('download', entry.path));
@@ -427,7 +447,14 @@ export function Workspace() {
                 <Button component={Link} to={directoryRoute(all.slice(0, index + 1).join('/'))} size="small" key={`${segment}-${index}`} sx={{ minWidth: 0, p: 0.5 }}>{segment}</Button>
               ))}
             </Breadcrumbs>
+            <Typography variant="caption" color="text.secondary" component="p" sx={{ mt: 0.75 }}>
+              {listing.disk && listing.disk.totalBytes > 0
+                ? t('storage.volume', { free: formatBytes(listing.disk.freeBytes), total: formatBytes(listing.disk.totalBytes) })
+                : t('storage.unknown')}
+            </Typography>
           </Box>
+          <Button sx={{ minHeight: 44 }} onClick={() => tasks?.open()}>{t('tasks.title')}</Button>
+          <Button sx={{ minHeight: 44 }} onClick={() => setFavoritesOpen(true)}>{t('favorites.title')}</Button>
           {!mutable && canUpload && <Chip label={t('workspace.uploadsOnly')} color="info" variant="outlined" />}
           {!mutable && !canUpload && <Chip label={t('workspace.readOnly')} variant="outlined" />}
           <Box sx={{ display: { xs: 'grid', sm: 'flex' }, gridTemplateColumns: { xs: 'repeat(2, minmax(0, 1fr))', sm: undefined }, flexWrap: 'wrap', gap: 1, width: { xs: '100%', sm: 'auto' } }}>
@@ -465,6 +492,7 @@ export function Workspace() {
               onChange={(event) => updateListingControls(() => setSearchQuery(event.target.value))}
               slotProps={{ htmlInput: { type: 'search' } }}
             />
+            <Button sx={{ flexShrink: 0, minHeight: 44 }} onClick={() => setSearchOpen(true)}>{t('searchPanel.title')}</Button>
             <TextField
               select
               size="small"
@@ -496,16 +524,18 @@ export function Workspace() {
             </TextField>
           </Stack>
         </Paper>
-        {selectedEntries.length > 0 && <Paper sx={{ ...surface, p: 1.25 }}>
+        {selectedEntries.length > 0 && <Paper component="section" aria-label={t('workspace.selected', { count: selectedEntries.length })} sx={{ ...surface, p: 1.25 }}>
           <Stack spacing={1.25}>
-            <Typography variant="bodyStrong">{t('workspace.selected', { count: selectedEntries.length })}</Typography>
+            <Stack direction="row" alignItems="center" justifyContent="space-between" spacing={1}>
+              <Typography variant="bodyStrong">{t('workspace.selected', { count: selectedEntries.length })}</Typography>
+              <Button size="small" variant="text" color="inherit" startIcon={<Close />} sx={{ color: 'text.secondary', flexShrink: 0, minWidth: 0, minHeight: { xs: 44, sm: 32 }, '&:hover': { bgcolor: 'action.hover', boxShadow: 'none' } }} onClick={() => setSelected(new Set())}>{t('action.clearSelection')}</Button>
+            </Stack>
             <Box sx={{ display: { xs: 'grid', sm: 'flex' }, gridTemplateColumns: { xs: 'repeat(2, minmax(0, 1fr))', sm: undefined }, flexWrap: 'wrap', gap: 0.75 }}>
               {mutable && <Button size="small" sx={{ minWidth: 0 }} startIcon={<Folder />} onClick={() => setForm({ action: 'move' })}>{t('action.move')}</Button>}
               {mutable && <Button size="small" sx={{ minWidth: 0 }} startIcon={<ContentCopy />} onClick={() => setForm({ action: 'copy' })}>{t('action.copy')}</Button>}
               {mutable && <Button size="small" sx={{ minWidth: 0 }} startIcon={<DeleteOutline />} onClick={() => setPendingDelete({ type: 'batch', entries: selectedEntries })}>{t('action.moveToRecycleBin')}</Button>}
               <Button size="small" sx={{ minWidth: 0 }} startIcon={<Archive />} onClick={() => doBatch('do/batch/download-zip')}>{t('action.batchDownload')}</Button>
             </Box>
-            <Box><Button size="small" onClick={() => setSelected(new Set())}>{t('action.cancel')}</Button></Box>
           </Stack>
         </Paper>}
         {mobile ? <MobileFileList
@@ -624,8 +654,8 @@ export function Workspace() {
       </Toolbar>
     </AppBar>
     {listingContent}
-    {listing && <>
     <SettingsPanel open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+    {listing && <>
     <RecycleBinPanel
       open={recycleBinOpen}
       onClose={() => setRecycleBinOpen(false)}
@@ -635,7 +665,16 @@ export function Workspace() {
       onNotice={(message, severity) => setNotice({ message, severity })}
     />
     <EntryMenu entry={menuEntry} anchor={menuAnchor} onClose={() => { setMenuEntry(null); setMenuAnchor(null); }} onAction={performEntryAction} mutable={mutable} editorAvailable={Boolean(session?.capabilities.editorSave || session?.capabilities.browse)} />
-    <EntryForm state={form} currentPath={listing.path} selectedEntries={selectedEntries} onClose={() => setForm(null)} onSubmit={(endpoint, values) => mutation.mutate({ endpoint, values, affectedDirectories: affectedDirectories(values.destination) })} onBatchSubmit={doBatch} />
+    <EntryForm state={form} currentPath={listing.path} selectedEntries={selectedEntries} onClose={() => setForm(null)} onSubmit={(endpoint, values) => {
+      if (endpoint === 'do/copy' && tasks) {
+        const entry = listing.entries.find(item => item.path === values.path);
+        if (entry) void tasks.submit({ kind: 'copy', path: entry.path, version: entry.version, destination: values.destination, name: values.name }).catch(error => setNotice({ message: error instanceof ApiError ? t(`error.${error.code}`) : t('error.generic'), severity: 'error' }));
+      } else mutation.mutate({ endpoint, values, affectedDirectories: affectedDirectories(values.destination) });
+    }} onBatchSubmit={doBatch} />
+    {favoritesOpen && <FavoritesPanel key={currentPath} directory={currentPath} onClose={() => setFavoritesOpen(false)} onNavigate={(path) => { setFavoritesOpen(false); navigate(directoryRoute(path)); }} />}
+    {searchOpen && <SearchPanel key={currentPath} directory={currentPath} onClose={() => setSearchOpen(false)} onNavigate={(path) => { setSearchOpen(false); navigate(directoryRoute(path)); }} />}
+    {extractFor && <ExtractArchiveDialog key={extractFor.path} entry={extractFor} onClose={() => setExtractFor(null)} />}
+    <ArchivePreviewPanel entry={archivePreviewFor} onClose={() => setArchivePreviewFor(null)} />
     <PropertiesDialog entry={propertiesFor} properties={propertyQuery.data?.properties} isLoading={propertyQuery.isLoading} onClose={() => setPropertiesFor(null)} />
     {activeEditor && <Suspense fallback={<Stack role="status" aria-live="polite" alignItems="center" justifyContent="center" sx={{ minHeight: 200 }}><CircularProgress /><Typography variant="caption" color="text.secondary" sx={{ mt: 2 }}>{t('editor.loading')}</Typography></Stack>}><LazyEditorDialog key={activeEditor.path} entry={activeEditor} writable={Boolean(session?.capabilities.editorSave)} onClose={closeEditor} onSaved={() => refreshDirectory(editorReturnPath)} /></Suspense>}
     {canUpload && <UploadQueueDrawer open={showUploads} onClose={() => setShowUploads(false)} destination={listing.path} username={session?.username ?? ''} onAllComplete={(paths) => { for (const path of paths) void refreshDirectory(path); }} />}
@@ -747,7 +786,7 @@ function PropertiesDialog({ entry, properties, isLoading, onClose }: { entry: Fi
       {properties && <Stack spacing={0} sx={{ mt: -1 }}>
         <DefinitionRow label={t('properties.type')} value={entryKindLabel(properties.kind, t)} />
         <DefinitionRow label={t('properties.location')} value={properties.path} mono />
-        <DefinitionRow label={t('properties.size')} value={formatBytes(properties.size)} />
+        {properties.kind === 'directory' ? <DirectorySize key={properties.path} path={properties.path} /> : <DefinitionRow label={t('properties.size')} value={formatBytes(properties.size)} />}
         <DefinitionRow label={t('properties.modified')} value={fmtDate(new Date(properties.modified * 1000).toISOString())} />
         <DefinitionRow label={t('properties.permissions')} value={properties.mode} mono />
         {properties.entry_count !== undefined && <DefinitionRow label={t('properties.contents')} value={properties.entry_count.toString()} />}

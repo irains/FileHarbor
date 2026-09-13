@@ -20,6 +20,7 @@ const maxAPIJSONBytes = int64(64 << 10)
 type sessionLoginRequest struct {
 	Username string `json:"username"`
 	Password string `json:"password"`
+	Remember bool   `json:"remember"`
 }
 
 type sessionPayload struct {
@@ -163,7 +164,7 @@ func sessionLoginHandler(manager *auth.Manager, state *RuntimeState) gin.Handler
 			jsonRequestError(c, err)
 			return
 		}
-		info, signedID, expiry, err := manager.Login(c.ClientIP(), request.Username, request.Password)
+		info, signedID, expiry, err := manager.LoginWithRemember(c.ClientIP(), request.Username, request.Password, request.Remember)
 		if err != nil {
 			outcome := "failure"
 			if errors.Is(err, auth.ErrRateLimited) {
@@ -181,7 +182,7 @@ func sessionLoginHandler(manager *auth.Manager, state *RuntimeState) gin.Handler
 			return
 		}
 		_ = state.Record(AuditEvent{Event: "auth.login", Outcome: "success", Principal: info.Username, AuthMethod: "session", ClientIP: c.ClientIP()})
-		http.SetCookie(c.Writer, manager.Cookie(signedID, expiry))
+		http.SetCookie(c.Writer, manager.LoginCookie(signedID, expiry, request.Remember))
 		http.SetCookie(c.Writer, manager.ExpiredLegacyCookie())
 		c.JSON(http.StatusOK, sessionPayloadFor(c, info, expiry.UTC().Format(timeFormat)))
 	}

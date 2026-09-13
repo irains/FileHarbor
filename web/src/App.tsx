@@ -1,6 +1,7 @@
 import { lazy, Suspense } from 'react';
 import { Navigate, Outlet, createBrowserRouter } from 'react-router-dom';
 import { getRuntime } from './runtime';
+import { TaskProvider } from './tasks/TaskProvider';
 import { SessionProvider } from './session/SessionProvider';
 
 const LoginPage = lazy(() => import('./components/LoginPage').then((module) => ({ default: module.LoginPage })));
@@ -15,7 +16,7 @@ function LoginRoute() {
 }
 
 function ProtectedShell() {
-  return <SessionProvider loginPage={false}><Suspense fallback={<RouteFallback />}><Outlet /></Suspense></SessionProvider>;
+  return <SessionProvider loginPage={false}><TaskProvider><Suspense fallback={<RouteFallback />}><Outlet /></Suspense></TaskProvider></SessionProvider>;
 }
 
 function UnknownRoute() {
