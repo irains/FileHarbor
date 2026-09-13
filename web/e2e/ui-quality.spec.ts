@@ -471,10 +471,23 @@ for (const width of [320, 390, 768, 1024, 1280]) {
     const bounds = await heading.boundingBox();
     expect(bounds).not.toBeNull();
     expect(bounds!.height).toBeLessThanOrEqual(36);
-    expect(bounds!.width).toBeGreaterThan(150);
+    // Measure the rendered text instead of assuming a system-font width.
+    const text = await heading.evaluate(element => {
+      const range = document.createRange();
+      range.selectNodeContents(element);
+      const rect = range.getBoundingClientRect();
+      return { left: rect.left, right: rect.right, width: rect.width, fits: element.scrollWidth <= element.clientWidth };
+    });
+    expect(text.width).toBeGreaterThan(0);
+    expect(text.fits).toBe(true);
+    expect(text.left).toBeGreaterThanOrEqual(bounds!.x - 1);
+    expect(text.right).toBeLessThanOrEqual(bounds!.x + bounds!.width + 1);
+    const refresh = await page.getByRole('button', { name: 'Refresh', exact: true }).boundingBox();
+    expect(refresh).not.toBeNull();
     if (width < 1024) {
-      const refresh = await page.getByRole('button', { name: 'Refresh', exact: true }).boundingBox();
       expect(refresh!.y).toBeGreaterThan(bounds!.y + bounds!.height);
+    } else {
+      expect(refresh!.x).toBeGreaterThanOrEqual(text.right);
     }
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
     if (width === 390 || width === 768) await page.screenshot({ path: `test-results/workspace-heading-${width}.png` });
