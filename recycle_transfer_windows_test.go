@@ -11,6 +11,7 @@ import (
 
 	"github.com/irains/fileharbor/conf"
 	"github.com/irains/fileharbor/utils"
+	"golang.org/x/sys/windows"
 )
 
 func TestWindowsRecycleAcrossVolumes(t *testing.T) {
@@ -122,4 +123,28 @@ func TestWindowsTrashVolumeDetectionIsConservative(t *testing.T) {
 	if !nativeCalled || cross || !errors.Is(err, syscall.ERROR_ACCESS_DENIED) {
 		t.Fatal("access denied incorrectly entered fallback")
 	}
+}
+
+func TestRecycleDirectoryFailuresWithShortTempPath(t *testing.T) {
+	parent := t.TempDir()
+	longPath, err := windows.UTF16PtrFromString(parent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	buffer := make([]uint16, 32768)
+	n, err := windows.GetShortPathName(longPath, &buffer[0], uint32(len(buffer)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n == 0 || n >= uint32(len(buffer)) {
+		t.Fatal("invalid short temporary path")
+	}
+	shortPath := windows.UTF16ToString(buffer[:n])
+	if shortPath == parent {
+		t.Skip("temporary volume does not provide a distinct 8.3 alias")
+	}
+	t.Setenv("TMP", shortPath)
+	t.Setenv("TEMP", shortPath)
+	t.Run("transfer-failures", TestRecycleDirectoryTransferFailures)
+	t.Run("lifecycle", TestRecycleDirectoryLifecycle)
 }

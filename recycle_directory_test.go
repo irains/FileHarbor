@@ -108,8 +108,10 @@ func TestRecycleDirectoryTransferFailures(t *testing.T) {
 			native := bin.renameNoReplace
 			cross := errors.New("test cross-device")
 			bin.isCrossDeviceError = func(err error) bool { return errors.Is(err, cross) }
+			injected := false
 			bin.renameNoReplace = func(from, to string) error {
 				if from == source {
+					injected = true
 					if scenario == "access-denied" {
 						return os.ErrPermission
 					}
@@ -129,6 +131,9 @@ func TestRecycleDirectoryTransferFailures(t *testing.T) {
 				}
 			}
 			entry, err := bin.Move("folder")
+			if !injected {
+				t.Fatal("source transfer fault injection was not reached")
+			}
 			switch scenario {
 			case "access-denied", "publication":
 				if utils.ErrorCode(err) != "io_error" {

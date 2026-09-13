@@ -13,7 +13,12 @@ import (
 func useRecycleBin(t *testing.T) (*RecycleBin, string, *RuntimeState) {
 	t.Helper()
 	previousRoot := conf.FileHarbor
-	root := t.TempDir()
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Match the canonical paths used by Root and OpenRuntimeState. Windows
+	// temporary paths may contain an 8.3 alias (for example RUNNER~1).
 	conf.FileHarbor = root
 	t.Cleanup(func() { conf.FileHarbor = previousRoot })
 	state, err := OpenRuntimeState(t.TempDir(), root)
