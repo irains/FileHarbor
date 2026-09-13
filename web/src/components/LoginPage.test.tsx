@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { api, type BrowserSession } from '../api/client';
 import { I18nProvider } from '../i18n';
 import { SessionProvider } from '../session/SessionProvider';
@@ -30,6 +30,7 @@ function fillAndSubmit(container: HTMLElement, rememberPassword = true, remember
 
 beforeEach(() => {
   vi.clearAllMocks();
+  localStorage.clear();
   store.mockResolvedValue(null);
   vi.stubGlobal('isSecureContext', true);
   vi.stubGlobal('PasswordCredential', credentialConstructor);
@@ -74,74 +75,75 @@ describe('LoginPage', () => {
 });
 
 
-describe('browser password saving', () => {
-  it.each([false, true])('does not save without explicit opt-in (keep signed in: %s)', async (remember) => {
-    const { container } = renderLogin();
-    fillAndSubmit(container, false, remember);
+describe('local login memory', () => {
+  const key = 'fileharbor.login.v1:/';
+  it('saves after authentication and fills the next visit without signing in', async () => {
+    const view = renderLogin();
+    fillAndSubmit(view.container);
     await waitFor(() => expect(assign).toHaveBeenCalledWith('/'));
+    expect(JSON.parse(localStorage.getItem(key)!)).toEqual({ version: 1, username: 'alice', password: 'private-password' });
+    view.unmount();
+    vi.mocked(api.login).mockClear();
+    const next = renderLogin();
+    expect(next.container.querySelector('input[name="username"]')).toHaveValue('alice');
+    expect(next.container.querySelector('input[name="password"]')).toHaveValue('private-password');
+    expect(next.container.querySelector('input[name="rememberPassword"]')).toBeChecked();
+    expect(api.login).not.toHaveBeenCalled();
+    fireEvent.click(next.container.querySelector('input[name="rememberPassword"]')!);
+    expect(localStorage.getItem(key)).toBeNull();
+    expect(store).not.toHaveBeenCalled();
+  });
+  it.each([false, true])('does not save without opt-in (keep signed in %s)', async remember => {
+    const view = renderLogin();
+    fillAndSubmit(view.container, false, remember);
+    await waitFor(() => expect(assign).toHaveBeenCalled());
     expect(api.login).toHaveBeenCalledWith('alice', 'private-password', remember);
-    expect(store).not.toHaveBeenCalled();
-    expect(credentialConstructor).not.toHaveBeenCalled();
-    expect(get).not.toHaveBeenCalled();
+    expect(localStorage.getItem(key)).toBeNull();
   });
-
-  it('requests saving only after successful authentication, independently of keep signed in', async () => {
-    let completeLogin!: (session: BrowserSession) => void;
-    vi.mocked(api.login).mockReturnValue(new Promise(resolve => { completeLogin = resolve; }));
-    const localWrite = vi.spyOn(Storage.prototype, 'setItem');
-    const { container } = renderLogin();
-    fillAndSubmit(container);
-    await waitFor(() => expect(api.login).toHaveBeenCalledWith('alice', 'private-password', false));
-    expect(store).not.toHaveBeenCalled();
-    expect(credentialConstructor).not.toHaveBeenCalled();
-    completeLogin(session);
-    await waitFor(() => expect(assign).toHaveBeenCalledWith('/'));
-    expect(credentialConstructor).toHaveBeenCalledExactlyOnceWith({ id: 'alice', password: 'private-password' });
-    expect(store).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ id: 'alice', password: 'private-password' }));
-    expect(get).not.toHaveBeenCalled();
-    expect(localWrite).not.toHaveBeenCalled();
-    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  it('waits for authentication before saving', async () => {
+    let complete!: (value: BrowserSession) => void;
+    vi.mocked(api.login).mockReturnValue(new Promise(resolve => { complete = resolve; }));
+    const view = renderLogin(); fillAndSubmit(view.container);
+    await waitFor(() => expect(api.login).toHaveBeenCalled());
+    expect(localStorage.getItem(key)).toBeNull();
+    complete(session);
+    await waitFor(() => expect(assign).toHaveBeenCalled());
+    expect(localStorage.getItem(key)).not.toBeNull();
   });
-
-  it('continues full-page login after one second when saving never settles', async () => {
-    vi.useFakeTimers();
-    store.mockReturnValue(new Promise(() => {}));
-    const clearTimer = vi.spyOn(globalThis, 'clearTimeout');
-    const { container } = renderLogin();
-    await act(async () => { fillAndSubmit(container); });
-    expect(store).toHaveBeenCalledOnce();
-    expect(assign).not.toHaveBeenCalled();
-    await act(async () => { await vi.advanceTimersByTimeAsync(999); });
-    expect(assign).not.toHaveBeenCalled();
-    await act(async () => { await vi.advanceTimersByTimeAsync(1); });
-    expect(assign).toHaveBeenCalledExactlyOnceWith('/');
-    expect(clearTimer).toHaveBeenCalled();
-    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
-  });
-
-  it('never saves failed authentication', async () => {
-    vi.mocked(api.login).mockRejectedValue(new Error('Login failed'));
-    const { container } = renderLogin();
-    fillAndSubmit(container);
+  it('preserves a saved record when changed credentials fail authentication', async () => {
+    const original = JSON.stringify({ version: 1, username: 'old-user', password: 'old-password' });
+    localStorage.setItem(key, original);
+    vi.mocked(api.login).mockRejectedValue(new Error('Failed'));
+    const view = renderLogin(); fillAndSubmit(view.container, false);
     await screen.findByRole('alert');
-    expect(store).not.toHaveBeenCalled();
-    expect(credentialConstructor).not.toHaveBeenCalled();
+    expect(localStorage.getItem(key)).toBe(original);
+  });
+  it('does not save failed authentication', async () => {
+    vi.mocked(api.login).mockRejectedValue(new Error('Failed'));
+    const view = renderLogin(); fillAndSubmit(view.container);
+    await screen.findByRole('alert');
+    expect(localStorage.getItem(key)).toBeNull();
     expect(assign).not.toHaveBeenCalled();
   });
-
-  it.each(['insecure', 'missing constructor', 'missing credentials', 'missing store', 'rejected', 'throws'])('keeps login working when password saving is %s', async (condition) => {
-    if (condition === 'insecure') vi.stubGlobal('isSecureContext', false);
-    if (condition === 'missing constructor') vi.stubGlobal('PasswordCredential', undefined);
-    if (condition === 'missing credentials') vi.stubGlobal('navigator', {});
-    if (condition === 'missing store') vi.stubGlobal('navigator', { credentials: {} });
-    if (condition === 'rejected') store.mockRejectedValue(new Error('Permission denied'));
-    if (condition === 'throws') credentialConstructor.mockImplementationOnce(() => { throw new Error('Unavailable'); });
-    const { container } = renderLogin();
-    fillAndSubmit(container);
-    await waitFor(() => expect(assign).toHaveBeenCalledWith('/'));
-    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
-    expect(container.querySelector('input[name="password"]')).toHaveAttribute('autocomplete', 'current-password');
-    if (condition !== 'rejected') expect(store).not.toHaveBeenCalled();
-    expect(get).not.toHaveBeenCalled();
+  it('reports save failure but lets the authenticated user continue', async () => {
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('Blocked'); });
+    const view = renderLogin(); fillAndSubmit(view.container);
+    await screen.findByText('Signed in, but this browser could not save your login.');
+    expect(assign).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Continue to workspace' }));
+    expect(assign).toHaveBeenCalledWith('/');
+  });
+  it('reports removal failure', () => {
+    localStorage.setItem(key, JSON.stringify({ version: 1, username: 'alice', password: 'private-password' }));
+    vi.spyOn(Storage.prototype, 'removeItem').mockImplementation(() => { throw new Error('Blocked'); });
+    const view = renderLogin();
+    fireEvent.click(view.container.querySelector('input[name="rememberPassword"]')!);
+    expect(screen.getByRole('alert')).toHaveTextContent('Saved login could not be removed');
+  });
+  it('handles malformed stored data without filling it', () => {
+    localStorage.setItem(key, '{');
+    const view = renderLogin();
+    expect(view.container.querySelector('input[name="password"]')).toHaveValue('');
+    expect(screen.getByRole('alert')).toHaveTextContent('Saved login could not be read');
   });
 });

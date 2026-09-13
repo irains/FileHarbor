@@ -38,7 +38,7 @@ async function mockWorkspaceApi(page: import('@playwright/test').Page) {
 test('login labels stay within the outlined controls after focus', async ({ page }) => {
   await page.goto('/login');
   const username = page.locator('input[name="username"]');
-  const label = page.locator('label').filter({ hasText: 'Username' });
+  const label = page.locator(`label[for="${await username.getAttribute('id')}"]`);
   await username.focus();
 
   const [inputBox, labelBox] = await Promise.all([username.boundingBox(), label.boundingBox()]);
@@ -77,9 +77,10 @@ test('operation dialog labels stay inside the content area', async ({ page }) =>
   expect(labelBox!.y).toBeLessThan(inputBox!.y + inputBox!.height);
 });
 
-for (const width of [390, 1280]) {
+for (const width of [320, 390, 768, 1280]) {
 test(`folder navigation is SPA-based and supports browser history at ${width}px`, async ({ page }) => {
   await page.setViewportSize({ width, height: 844 });
+  await mockWorkspaceApi(page);
   let sessionRequests = 0;
   const requestedPaths: string[] = [];
   await page.route('**/api/session', (route) => { sessionRequests += 1; return route.fulfill({ json: session }); });
@@ -110,11 +111,27 @@ test(`folder navigation is SPA-based and supports browser history at ${width}px`
   await page.goForward();
   await expect(page).toHaveURL(/\/d\/Docs%20%231$/);
   const parent = page.getByRole('link', { name: 'Go to parent folder', exact: true });
-  await expect(parent).toHaveText('..');
+  await expect(parent).toHaveText('Up one level');
+  await expect.poll(async () => {
+    const bounds = await parent.boundingBox();
+    return Boolean(bounds && bounds.x <= 41 && bounds.height >= 44);
+  }).toBe(true);
+  await expect(parent.locator('xpath=ancestor::tr').getByRole('checkbox')).toHaveCount(0);
+  await page.screenshot({ path: `test-results/parent-navigation-${width}.png` });
   await expect(parent.locator('xpath=ancestor::table | ancestor::*[@aria-label="Workspace"]')).toHaveCount(1);
-  await parent.click();
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await page.getByRole('radio', { name: '简体中文', exact: true }).click();
+  await page.getByRole('button', { name: '关闭', exact: true }).click();
+  const chineseParent = page.getByRole('link', { name: '前往上一级文件夹', exact: true });
+  await expect(chineseParent).toHaveText('上一级');
+  await page.getByRole('searchbox', { name: '搜索项目' }).fill('no-matching-entry');
+  await expect(page.getByRole('link', { name: 'Nested folder' })).toHaveCount(0);
+  await expect(chineseParent).toBeVisible();
+  await page.screenshot({ path: `test-results/parent-navigation-zh-${width}.png` });
+  await chineseParent.focus();
+  await chineseParent.press('Enter');
   await expect(page).toHaveURL(/\/$/);
-  await expect(parent).toHaveCount(0);
+  await expect(chineseParent).toHaveCount(0);
   expect(await page.locator('header').evaluate((node, original) => node === original, appBarElement)).toBe(true);
 });
 }

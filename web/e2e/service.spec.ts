@@ -60,11 +60,27 @@ test.describe('Go service integration', () => {
 
     await page.goto('/d/service-fixture');
     await expect(page.getByRole('heading', { name: 'Welcome back' })).toBeVisible();
-    await page.getByLabel('Username').fill(username!);
+    await page.locator('input[name="username"]').fill(username!);
     await page.locator('input[name="password"][type="password"]').fill(password!);
     await page.getByRole('checkbox', { name: 'Keep me signed in for 30 days' }).check();
+    await page.getByRole('checkbox', { name: 'Remember username and password', exact: true }).check();
     await page.getByRole('button', { name: 'Sign in' }).click();
 
+    await expect(page).toHaveURL(/\/d\/service-fixture$/);
+    await page.getByRole('button', { name: 'Sign out', exact: true }).click();
+    await expect(page.getByRole('heading', { name: 'Welcome back' })).toBeVisible();
+    // Only assert booleans: never serialize ephemeral credentials into failures.
+    expect(await page.locator('input[name="username"]').inputValue() === username).toBe(true);
+    expect(await page.locator('input[name="password"]').inputValue() === password).toBe(true);
+    await page.getByRole('checkbox', { name: 'Remember username and password', exact: true }).uncheck();
+    await page.reload();
+    expect(await page.locator('input[name="password"]').inputValue() === '').toBe(true);
+    await page.locator('input[name="username"]').fill(username!);
+    await page.locator('input[name="password"]').fill(password!);
+    await page.getByRole('checkbox', { name: 'Keep me signed in for 30 days' }).check();
+    await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+    await expect(page).toHaveURL(/\/$/);
+    await page.getByRole('link', { name: 'service-fixture', exact: true }).click();
     await expect(page).toHaveURL(/\/d\/service-fixture$/);
     const rememberedCookie = (await page.context().cookies()).find((cookie) => cookie.name === 'fileharbor_session');
     expect(Boolean(rememberedCookie?.httpOnly)).toBe(true);
@@ -109,7 +125,7 @@ test.describe('Go service integration', () => {
     const recycleBinEntry = recycleBin.getByText(restoredName, { exact: true });
     await page.goto('/d/service-fixture');
     await expect(page.getByRole('heading', { name: 'Welcome back' })).toBeVisible();
-    await page.getByLabel('Username').fill(username!);
+    await page.locator('input[name="username"]').fill(username!);
     await page.locator('input[name="password"][type="password"]').fill(password!);
     await page.getByRole('button', { name: 'Sign in' }).click();
 
@@ -163,7 +179,7 @@ test.describe('Go service integration', () => {
     const recycleBinEntry = recycleBin.getByText(restoredName, { exact: true });
     await page.goto('/d/service-fixture');
     await expect(page.getByRole('heading', { name: 'Welcome back' })).toBeVisible();
-    await page.getByLabel('Username').fill(username!);
+    await page.locator('input[name="username"]').fill(username!);
     await page.locator('input[name="password"][type="password"]').fill(password!);
     await page.getByRole('button', { name: 'Sign in' }).click();
 
@@ -227,7 +243,7 @@ test.describe('bounded read tools against Go service', () => {
   test.skip(!hasServiceConfiguration, 'requires ephemeral service credentials');
   test('searches descendants and previews a newly created archive without extraction', async ({ page }) => {
     await page.goto('/d/service-fixture');
-    await page.getByLabel('Username').fill(username!);
+    await page.locator('input[name="username"]').fill(username!);
     await page.locator('input[name="password"][type="password"]').fill(password!);
     await page.getByRole('button', { name: 'Sign in', exact: true }).click();
     await expect(page.getByRole('button', { name: 'seed.txt', exact: true })).toBeVisible();
@@ -303,7 +319,7 @@ test.describe('shared favorites against Go service', () => {
   test.skip(!hasServiceConfiguration, 'requires ephemeral service credentials');
   test('shares favorite metadata with a second browser session', async ({ page, browser }) => {
     await page.goto('/d/service-fixture');
-    await page.getByLabel('Username').fill(username!);
+    await page.locator('input[name="username"]').fill(username!);
     await page.locator('input[name="password"][type="password"]').fill(password!);
     await page.getByRole('button', { name: 'Sign in', exact: true }).click();
     await expect(page.getByRole('button', { name: 'seed.txt', exact: true })).toBeVisible();
@@ -322,7 +338,7 @@ test.describe('shared favorites against Go service', () => {
     try {
       const other = await context.newPage();
       await other.goto(new URL('/', page.url()).href);
-      await other.getByLabel('Username').fill(username!);
+      await other.locator('input[name="username"]').fill(username!);
       await other.locator('input[name="password"][type="password"]').fill(password!);
       await other.getByRole('button', { name: 'Sign in', exact: true }).click();
       await other.getByRole('button', { name: 'Favorites', exact: true }).click();
@@ -338,7 +354,7 @@ test.describe('folder uploads against Go service', () => {
   test.skip(!hasServiceConfiguration, 'requires ephemeral service credentials');
   test('uploads equal filenames into separate nested folders and calculates size', async ({ page }) => {
     await page.goto('/d/service-fixture');
-    await page.getByLabel('Username').fill(username!);
+    await page.locator('input[name="username"]').fill(username!);
     await page.locator('input[name="password"][type="password"]').fill(password!);
     await page.getByRole('button', { name: 'Sign in', exact: true }).click();
     const folder = `folder-upload-${Date.now()}`;

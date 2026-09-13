@@ -4,6 +4,7 @@ import { ExtractArchiveDialog } from './ExtractArchiveDialog';
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   Add,
+  ArrowUpward,
   Archive,
   Close,
   ContentCopy,
@@ -184,8 +185,8 @@ function MobileFileList({
         <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase' }}>{t('workspace.name')}</Typography>
       </Box>
       <Box aria-label={t('app.workspace')}>
-        {parentPath !== null && <Box sx={{ pl: 6.5, pr: 1.5, borderBottom: '1px solid', borderColor: 'divider' }}>
-          <Button component={Link} to={directoryRoute(parentPath)} aria-label={t('workspace.parentDirectory')} title={t('workspace.parentDirectory')} startIcon={<Folder fontSize="small" />} color="inherit" sx={{ minHeight: 44, justifyContent: 'flex-start', width: '100%', fontWeight: 700 }}>..</Button>
+        {parentPath !== null && <Box sx={{ px: 1.5, borderBottom: '1px solid', borderColor: 'divider' }}>
+          <Button component={Link} to={directoryRoute(parentPath)} aria-label={t('workspace.parentDirectory')} title={t('workspace.parentDirectory')} startIcon={<ArrowUpward fontSize="small" />} color="inherit" sx={{ minHeight: 44, justifyContent: 'flex-start', width: '100%', fontWeight: 700 }}>{t('workspace.upOneLevel')}</Button>
         </Box>}
         {entries.map((entry, index) => (
           <Box key={entry.path} sx={{ display: 'flex', alignItems: 'flex-start', gap: 0.75, px: 1.5, py: 1.25, borderTop: index ? '1px solid' : undefined, borderColor: 'divider', bgcolor: selected.has(entry.path) ? 'action.selected' : undefined }}>
@@ -575,9 +576,8 @@ export function Workspace() {
             </TableRow></TableHead>
             <TableBody>
               {listing.parentPath !== null && <TableRow hover>
-                <TableCell padding="checkbox" />
-                <TableCell colSpan={compact ? 2 : 4}>
-                  <Button component={Link} to={directoryRoute(listing.parentPath)} aria-label={t('workspace.parentDirectory')} title={t('workspace.parentDirectory')} startIcon={<Folder />} color="inherit" sx={{ minHeight: 44, justifyContent: 'flex-start', width: '100%', fontWeight: 700 }}>..</Button>
+                <TableCell colSpan={compact ? 3 : 5}>
+                  <Button component={Link} to={directoryRoute(listing.parentPath)} aria-label={t('workspace.parentDirectory')} title={t('workspace.parentDirectory')} startIcon={<ArrowUpward fontSize="small" />} color="inherit" sx={{ minHeight: 44, justifyContent: 'flex-start', width: '100%', fontWeight: 700 }}>{t('workspace.upOneLevel')}</Button>
                 </TableCell>
               </TableRow>}
               {displayedEntries.map((entry) => (
