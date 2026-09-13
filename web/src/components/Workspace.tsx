@@ -13,7 +13,6 @@ import {
   DownloadOutlined,
   Folder,
   FolderOffOutlined,
-  KeyboardArrowUp,
   InfoOutlined,
   LogoutOutlined,
   MoreVert,
@@ -145,6 +144,7 @@ function RowActions({ entry, mutable, editorAvailable, compact = false, onAction
 }
 
 function MobileFileList({
+  parentPath,
   entries,
   selected,
   selectionState,
@@ -157,6 +157,7 @@ function MobileFileList({
   emptyState,
   busy = false
 }: {
+  parentPath: string | null;
   entries: FileEntry[];
   selected: ReadonlySet<string>;
   selectionState: ReturnType<typeof listingSelectionState>;
@@ -183,6 +184,9 @@ function MobileFileList({
         <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase' }}>{t('workspace.name')}</Typography>
       </Box>
       <Box aria-label={t('app.workspace')}>
+        {parentPath !== null && <Box sx={{ pl: 6.5, pr: 1.5, borderBottom: '1px solid', borderColor: 'divider' }}>
+          <Button component={Link} to={directoryRoute(parentPath)} aria-label={t('workspace.parentDirectory')} title={t('workspace.parentDirectory')} startIcon={<Folder fontSize="small" />} color="inherit" sx={{ minHeight: 44, justifyContent: 'flex-start', width: '100%', fontWeight: 700 }}>..</Button>
+        </Box>}
         {entries.map((entry, index) => (
           <Box key={entry.path} sx={{ display: 'flex', alignItems: 'flex-start', gap: 0.75, px: 1.5, py: 1.25, borderTop: index ? '1px solid' : undefined, borderColor: 'divider', bgcolor: selected.has(entry.path) ? 'action.selected' : undefined }}>
             <Checkbox size="small" sx={{ mt: -0.5, ml: -0.75 }} aria-label={t('workspace.selectItem', { name: entry.name })} checked={selected.has(entry.path)} onChange={(event) => onSelect(entry, event.target.checked)} />
@@ -439,11 +443,11 @@ export function Workspace() {
       </Paper>
     </Stack>
   ) : (
-    <Box sx={{ maxWidth: 1440, mx: 'auto', px: { xs: 2, sm: 3 }, py: 3 }}>
+    <Box sx={{ maxWidth: 1440, mx: 'auto', px: { xs: 2, sm: 3 }, py: { xs: 2, sm: 3 } }}>
       <Stack spacing={2.5}>
-        <Box sx={{ display: 'flex', alignItems: { sm: 'center' }, flexDirection: { xs: 'column', sm: 'row' }, gap: 2 }}>
+        <Box sx={{ display: 'flex', alignItems: 'stretch', flexDirection: 'column', gap: { xs: 1.5, sm: 2 }, '@media (min-width: 1024px)': { alignItems: 'center', flexDirection: 'row' } }}>
           <Box sx={{ flex: 1, minWidth: 0, alignSelf: 'stretch' }}>
-            <Typography component="h1" variant="display">{t('app.workspace')}</Typography>
+            <Typography component="h1" variant="display" sx={{ fontSize: { xs: 20, sm: 24, lg: 28 }, lineHeight: { xs: '28px', sm: '32px', lg: '36px' }, whiteSpace: 'nowrap' }}>{t('app.workspace')}</Typography>
             <Breadcrumbs aria-label="breadcrumb" sx={{ mt: .5, overflow: 'hidden' }}>
               <Button component={Link} to={directoryRoute('')} size="small" sx={{ minWidth: 0, p: 0.5 }}>{t('workspace.root')}</Button>
               {breadcrumbs.map((segment, index, all) => (
@@ -479,11 +483,6 @@ export function Workspace() {
         {refreshError && <Alert severity="warning" action={<Button color="inherit" size="small" disabled={refreshInProgress} onClick={() => void handleManualRefresh()}>{t('action.retry')}</Button>}>{refreshError}</Alert>}
         {manualRefresh && <Typography role="status" aria-live="polite" sx={{ position: 'absolute', width: 1, height: 1, p: 0, m: -1, overflow: 'hidden', clip: 'rect(0 0 0 0)', whiteSpace: 'nowrap', border: 0 }}>{t('workspace.refreshing')}</Typography>}
         {listing.truncated && <Alert severity="warning"><Stack spacing={0.5}><span>{t('workspace.truncated')}</span><span>{t('workspace.truncatedFiltering')}</span></Stack></Alert>}
-        {listing.parentPath !== null && (
-          <Paper sx={{ ...surface, px: 1, py: 0.5 }}>
-            <Button component={Link} to={directoryRoute(listing.parentPath!)} startIcon={<KeyboardArrowUp />} aria-label={t('workspace.parentDirectory')}>{t('workspace.upOneLevel')}</Button>
-          </Paper>
-        )}
         <Paper sx={{ ...surface, p: { xs: 1.25, sm: 1.5 } }}>
           <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.25}>
             <TextField
@@ -543,6 +542,7 @@ export function Workspace() {
           </Stack>
         </Paper>}
         {mobile ? <MobileFileList
+          parentPath={listing.parentPath}
           entries={displayedEntries}
           selected={selectedForCurrentToken}
           selectionState={selectionState}
@@ -574,6 +574,12 @@ export function Workspace() {
               <TableCell align="right" sx={{ width: 160 }}>{t('workspace.actions')}</TableCell>
             </TableRow></TableHead>
             <TableBody>
+              {listing.parentPath !== null && <TableRow hover>
+                <TableCell padding="checkbox" />
+                <TableCell colSpan={compact ? 2 : 4}>
+                  <Button component={Link} to={directoryRoute(listing.parentPath)} aria-label={t('workspace.parentDirectory')} title={t('workspace.parentDirectory')} startIcon={<Folder />} color="inherit" sx={{ minHeight: 44, justifyContent: 'flex-start', width: '100%', fontWeight: 700 }}>..</Button>
+                </TableCell>
+              </TableRow>}
               {displayedEntries.map((entry) => (
                 <TableRow hover key={entry.path} selected={selectedForCurrentToken.has(entry.path)}>
                   <TableCell padding="checkbox"><Checkbox aria-label={t('workspace.selectItem', { name: entry.name })} checked={selectedForCurrentToken.has(entry.path)} onChange={(event) => select(entry, event.target.checked)} /></TableCell>

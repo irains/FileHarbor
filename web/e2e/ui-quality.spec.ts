@@ -77,7 +77,9 @@ test('operation dialog labels stay inside the content area', async ({ page }) =>
   expect(labelBox!.y).toBeLessThan(inputBox!.y + inputBox!.height);
 });
 
-test('folder navigation is SPA-based and supports browser history', async ({ page }) => {
+for (const width of [390, 1280]) {
+test(`folder navigation is SPA-based and supports browser history at ${width}px`, async ({ page }) => {
+  await page.setViewportSize({ width, height: 844 });
   let sessionRequests = 0;
   const requestedPaths: string[] = [];
   await page.route('**/api/session', (route) => { sessionRequests += 1; return route.fulfill({ json: session }); });
@@ -107,9 +109,15 @@ test('folder navigation is SPA-based and supports browser history', async ({ pag
   await expect(page.getByRole('link', { name: 'Docs #1' })).toBeVisible();
   await page.goForward();
   await expect(page).toHaveURL(/\/d\/Docs%20%231$/);
-  await page.getByRole('link', { name: 'Root' }).click();
+  const parent = page.getByRole('link', { name: 'Go to parent folder', exact: true });
+  await expect(parent).toHaveText('..');
+  await expect(parent.locator('xpath=ancestor::table | ancestor::*[@aria-label="Workspace"]')).toHaveCount(1);
+  await parent.click();
   await expect(page).toHaveURL(/\/$/);
+  await expect(parent).toHaveCount(0);
+  expect(await page.locator('header').evaluate((node, original) => node === original, appBarElement)).toBe(true);
 });
+}
 
 test('editor route blocks dirty navigation and closes to its origin', async ({ page }) => {
   await page.route('**/api/session', (route) => route.fulfill({ json: session }));
@@ -450,5 +458,25 @@ for (const width of [320, 390, 768, 1280]) {
     await expect(page.getByRole('button', { name: 'Favorite this folder', exact: true })).toHaveAttribute('aria-pressed', 'false');
     await page.locator('input[type="checkbox"]').nth(1).check();
     await expect(page.getByRole('button', { name: 'Favorite this folder', exact: true })).toHaveCount(0);
+  });
+}
+
+for (const width of [320, 390, 768, 1024, 1280]) {
+  test(`workspace heading fits the toolbar at ${width}px`, async ({ page }) => {
+    await mockWorkspaceApi(page);
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto('/');
+    const heading = page.getByRole('heading', { name: 'Workspace', exact: true });
+    await expect(heading).toBeVisible();
+    const bounds = await heading.boundingBox();
+    expect(bounds).not.toBeNull();
+    expect(bounds!.height).toBeLessThanOrEqual(36);
+    expect(bounds!.width).toBeGreaterThan(150);
+    if (width < 1024) {
+      const refresh = await page.getByRole('button', { name: 'Refresh', exact: true }).boundingBox();
+      expect(refresh!.y).toBeGreaterThan(bounds!.y + bounds!.height);
+    }
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    if (width === 390 || width === 768) await page.screenshot({ path: `test-results/workspace-heading-${width}.png` });
   });
 }
