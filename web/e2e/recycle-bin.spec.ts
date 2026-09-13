@@ -29,6 +29,8 @@ for (const width of [390, 1280]) {
         const endpoint = mode === 'single' ? '/do/rm' : '/do/batch/delete';
         const selectedFiles = mode === 'single' ? files.slice(0, 1) : files;
         await page.route('**/api/session', (route) => route.fulfill({ json: session }));
+        await page.route('**/api/jobs', (route) => route.fulfill({ json: { ok: true, jobs: [] } }));
+        await page.route('**/api/favorites', (route) => route.fulfill({ json: { ok: true, entries: [] } }));
         await page.route(/\/api\/listing/, (route) => route.fulfill({
           json: {
             ok: true,

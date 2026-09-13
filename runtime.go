@@ -38,6 +38,7 @@ type AuditEvent struct {
 	Principal  string    `json:"principal,omitempty"`
 	AuthMethod string    `json:"auth_method,omitempty"`
 	ClientIP   string    `json:"client_ip,omitempty"`
+	JobID      string    `json:"job_id,omitempty"`
 	Path       string    `json:"path,omitempty"`
 	Affected   int       `json:"affected,omitempty"`
 	Code       string    `json:"code,omitempty"`

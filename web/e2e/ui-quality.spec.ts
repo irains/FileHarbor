@@ -10,6 +10,8 @@ const session = {
 
 async function mockWorkspaceApi(page: import('@playwright/test').Page) {
   await page.route('**/api/session', (route) => route.fulfill({ json: session }));
+  await page.route('**/api/favorites', route => route.fulfill({ json: { ok: true, entries: [] } }));
+  await page.route('**/api/jobs', route => route.fulfill({ json: { ok: true, jobs: [] } }));
   await page.route(/\/api\/listing/, (route) => route.fulfill({
     json: {
       ok: true,
@@ -383,7 +385,9 @@ for (const locale of ['en', 'zh']) for (const scheme of ['light', 'dark'] as con
     await page.setViewportSize({ width, height: 900 });
     await mockWorkspaceApi(page);
     await page.emulateMedia({ colorScheme: scheme });
-    await page.route('**/api/jobs', route => route.fulfill({ json: { ok: true, jobs: [{
+    let removed = false;
+    await page.route('**/api/jobs/synthetic-task', route => { removed = true; return route.fulfill({ status: 204 }); });
+    await page.route('**/api/jobs', route => route.fulfill({ json: { ok: true, jobs: removed ? [] : [{
       id: 'synthetic-task', kind: 'copy', state: 'partial', phase: 'writing', sources: [{ path: 'Documents/long-source-name.txt', version: 'v1' }],
       destination: 'Documents/Reports', target: { mode: '' }, bytes: 1024, items: 1, published: ['Documents/Reports/file.txt'], intent: 'Documents/Reports/uncertain.txt', cancel_requested: false
     }] } }));
@@ -404,5 +408,47 @@ for (const locale of ['en', 'zh']) for (const scheme of ['light', 'dark'] as con
     await expect(panel.getByText(chinese ? /已有输出保留/ : /Existing outputs remain/)).toBeVisible();
     await page.keyboard.press('Escape');
     await expect(panel).toHaveCount(0);
+    await page.getByRole('button', { name: chinese ? '文件任务' : 'File tasks', exact: true }).click();
+    await panel.getByRole('button', { name: chinese ? '取消' : 'Cancel', exact: true }).click();
+    if (width === 390 || width === 1280) await page.screenshot({ path: `test-results/task-layout-${locale}-${scheme}-${width}.png` });
+    await panel.getByRole('button', { name: chinese ? '移除记录' : 'Remove record', exact: true }).click();
+    await panel.getByRole('button', { name: chinese ? '确认' : 'Confirm', exact: true }).click();
+    await expect(panel.getByRole('article')).toHaveCount(0);
+    await expect(panel.getByText(chinese ? '暂无文件任务。' : 'No file tasks yet.')).toBeVisible();
+  });
+}
+
+for (const width of [320, 390, 768, 1280]) {
+  test(`favorites toolbar and panel at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 });
+    await mockWorkspaceApi(page);
+    let entries: Array<{ id: string; path: string; label: string; revision: number; availability: string }> = [];
+    await page.route('**/api/favorites', async route => {
+      if (route.request().method() === 'POST') {
+        const body = route.request().postDataJSON();
+        const entry = { id: 'favorite', path: body.path, label: body.label, revision: 1, availability: 'available' };
+        entries = [entry];
+        return route.fulfill({ json: { ok: true, entry } });
+      }
+      return route.fulfill({ json: { ok: true, entries } });
+    });
+    await page.route('**/api/favorites/favorite', route => {
+      const entry = entries[0]; entries = [];
+      return route.fulfill({ json: { ok: true, entry } });
+    });
+    await page.goto('/');
+    await page.getByRole('button', { name: 'Favorite this folder', exact: true }).click();
+    await expect(page.getByRole('button', { name: 'Favorited', exact: true })).toHaveAttribute('aria-pressed', 'true');
+    await page.getByRole('button', { name: 'Favorites', exact: true }).click();
+    const panel = page.getByRole('dialog');
+    await expect(panel.getByText('Current folder', { exact: true })).toBeVisible();
+    if (width === 390 || width === 1280) await page.screenshot({ path: `test-results/favorites-layout-${width}.png` });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    await panel.getByRole('button', { name: 'Remove favorite', exact: true }).click();
+    await expect(panel.getByText('No favorite folders yet.')).toBeVisible();
+    await panel.getByRole('button', { name: 'Close', exact: true }).click();
+    await expect(page.getByRole('button', { name: 'Favorite this folder', exact: true })).toHaveAttribute('aria-pressed', 'false');
+    await page.locator('input[type="checkbox"]').nth(1).check();
+    await expect(page.getByRole('button', { name: 'Favorite this folder', exact: true })).toHaveCount(0);
   });
 }

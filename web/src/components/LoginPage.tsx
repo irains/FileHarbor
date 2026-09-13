@@ -10,9 +10,32 @@ import { useSession } from '../session/SessionProvider';
 import { Mark } from './Mark';
 import { surface } from '../tokens';
 
-const loginSchema = z.object({ username: z.string().trim().min(1), password: z.string().min(1), remember: z.boolean() });
+const loginSchema = z.object({ username: z.string().trim().min(1), password: z.string().min(1), remember: z.boolean(), rememberPassword: z.boolean() });
 type LoginValues = z.infer<typeof loginSchema>;
 const loginInputLabelProps = { shrink: true, disableAnimation: true } as const;
+
+// PasswordCredential is not declared by every TypeScript DOM library version.
+type PasswordCredentialConstructor = new (data: { id: string; password: string }) => Credential;
+
+async function requestBrowserPasswordSave(username: string, password: string): Promise<void> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const PasswordCredential = (window as Window & { PasswordCredential?: PasswordCredentialConstructor }).PasswordCredential;
+    if (!window.isSecureContext || !PasswordCredential || typeof navigator.credentials?.store !== 'function') return;
+    // Only the browser's password manager receives the password. A fulfilled
+    // request is not proof the browser saved it, so do not report success.
+    const saving = navigator.credentials.store(new PasswordCredential({ id: username, password }));
+    // Browser UI can leave this pending indefinitely; login must still finish.
+    await Promise.race([
+      saving,
+      new Promise<void>(resolve => { timeout = setTimeout(resolve, 1000); })
+    ]);
+  } catch {
+    // A denied/unavailable password manager must never turn a valid login into an error.
+  } finally {
+    if (timeout !== undefined) clearTimeout(timeout);
+  }
+}
 
 export function LoginPage() {
   const { t } = useI18n();
@@ -20,7 +43,7 @@ export function LoginPage() {
   const [serverError, setServerError] = useState<string | null>(null);
   const { control, handleSubmit, formState: { isSubmitting, errors } } = useForm<LoginValues>({
     resolver: zodResolver(loginSchema),
-    defaultValues: { username: '', password: '', remember: false },
+    defaultValues: { username: '', password: '', remember: false, rememberPassword: false },
     mode: 'onBlur',
     reValidateMode: 'onChange'
   });
@@ -28,6 +51,7 @@ export function LoginPage() {
     setServerError(null);
     try {
       const session = await api.login(values.username, values.password, values.remember);
+      if (values.rememberPassword) await requestBrowserPasswordSave(values.username, values.password);
       setSession(session);
       window.location.assign(getRuntime().loginNext);
     } catch (error) {
@@ -49,8 +73,11 @@ export function LoginPage() {
             <Controller name="password" control={control} render={({ field }) => <TextField {...field} type="password" autoComplete="current-password" label={t('login.password')} slotProps={{ inputLabel: loginInputLabelProps }} error={Boolean(errors.password)} helperText={errors.password ? t('login.passwordRequired') : undefined} fullWidth required />} />
             <Stack spacing={0.5}>
               <Controller name="remember" control={control} render={({ field: { value, ...field } }) => <FormControlLabel control={<Checkbox {...field} checked={value} />} label={t('login.remember')} />} />
-              <Typography variant="caption" color="text.secondary">{t('login.passwordManager')}</Typography>
               <Typography variant="caption" color="text.secondary">{t('login.rememberHint')}</Typography>
+            </Stack>
+            <Stack spacing={0.5}>
+              <Controller name="rememberPassword" control={control} render={({ field: { value, ...field } }) => <FormControlLabel control={<Checkbox {...field} checked={value} slotProps={{ input: { 'aria-describedby': 'password-manager-hint' } }} />} label={t('login.rememberPassword')} />} />
+              <Typography id="password-manager-hint" variant="caption" color="text.secondary">{t('login.rememberPasswordHint')}</Typography>
             </Stack>
             <Button type="submit" size="large" variant="contained" disabled={isSubmitting}>{t('login.signIn')}</Button>
           </Stack>

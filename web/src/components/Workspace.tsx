@@ -1,3 +1,4 @@
+import { FavoriteButton } from './FavoriteButton';
 import { useTasks } from '../tasks/TaskProvider';
 import { ExtractArchiveDialog } from './ExtractArchiveDialog';
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
@@ -18,6 +19,8 @@ import {
   MoreVert,
   Refresh,
   SettingsOutlined,
+  TaskAlt,
+  StarBorderOutlined,
   UploadFile
 } from '@mui/icons-material';
 import {
@@ -453,8 +456,6 @@ export function Workspace() {
                 : t('storage.unknown')}
             </Typography>
           </Box>
-          <Button sx={{ minHeight: 44 }} onClick={() => tasks?.open()}>{t('tasks.title')}</Button>
-          <Button sx={{ minHeight: 44 }} onClick={() => setFavoritesOpen(true)}>{t('favorites.title')}</Button>
           {!mutable && canUpload && <Chip label={t('workspace.uploadsOnly')} color="info" variant="outlined" />}
           {!mutable && !canUpload && <Chip label={t('workspace.readOnly')} variant="outlined" />}
           <Box sx={{ display: { xs: 'grid', sm: 'flex' }, gridTemplateColumns: { xs: 'repeat(2, minmax(0, 1fr))', sm: undefined }, flexWrap: 'wrap', gap: 1, width: { xs: '100%', sm: 'auto' } }}>
@@ -468,6 +469,8 @@ export function Workspace() {
             >
               {refreshInProgress ? t('workspace.refreshing') : t('workspace.refresh')}
             </Button>
+            <Button size={mobile ? 'small' : 'medium'} sx={{ minWidth: 0, minHeight: 44 }} startIcon={<StarBorderOutlined />} variant="outlined" onClick={() => setFavoritesOpen(true)}>{t('favorites.title')}</Button>
+            {selectedEntries.length === 0 && <FavoriteButton directory={currentPath} />}
             {mutable && <Button size={mobile ? 'small' : 'medium'} sx={{ minWidth: 0 }} startIcon={<CreateNewFolder />} variant="outlined" onClick={() => setForm({ action: 'newdir' })}>{t('workspace.newFolder')}</Button>}
             {mutable && <Button size={mobile ? 'small' : 'medium'} sx={{ minWidth: 0 }} startIcon={<Add />} variant="outlined" onClick={() => setForm({ action: 'newfile' })}>{t('workspace.newFile')}</Button>}
             {canUpload && <Button size={mobile ? 'small' : 'medium'} sx={{ minWidth: 0 }} startIcon={<UploadFile />} variant="contained" onClick={() => setShowUploads(true)}>{t('workspace.upload')}</Button>}
@@ -531,6 +534,7 @@ export function Workspace() {
               <Button size="small" variant="text" color="inherit" startIcon={<Close />} sx={{ color: 'text.secondary', flexShrink: 0, minWidth: 0, minHeight: { xs: 44, sm: 32 }, '&:hover': { bgcolor: 'action.hover', boxShadow: 'none' } }} onClick={() => setSelected(new Set())}>{t('action.clearSelection')}</Button>
             </Stack>
             <Box sx={{ display: { xs: 'grid', sm: 'flex' }, gridTemplateColumns: { xs: 'repeat(2, minmax(0, 1fr))', sm: undefined }, flexWrap: 'wrap', gap: 0.75 }}>
+              {selectedEntries.length === 1 && selectedEntries[0].kind === 'directory' && <FavoriteButton directory={selectedEntries[0].path} selected />}
               {mutable && <Button size="small" sx={{ minWidth: 0 }} startIcon={<Folder />} onClick={() => setForm({ action: 'move' })}>{t('action.move')}</Button>}
               {mutable && <Button size="small" sx={{ minWidth: 0 }} startIcon={<ContentCopy />} onClick={() => setForm({ action: 'copy' })}>{t('action.copy')}</Button>}
               {mutable && <Button size="small" sx={{ minWidth: 0 }} startIcon={<DeleteOutline />} onClick={() => setPendingDelete({ type: 'batch', entries: selectedEntries })}>{t('action.moveToRecycleBin')}</Button>}
@@ -639,9 +643,13 @@ export function Workspace() {
 
   return <Box component="main" sx={{ minHeight: '100dvh' }}>
     <AppBar position="sticky" elevation={0} color="transparent" sx={{ borderBottom: '1px solid', borderColor: 'divider', bgcolor: 'var(--mui-palette-AppBar-defaultBg)' }}>
-      <Toolbar sx={{ gap: 1, px: { xs: 2, sm: 3 } }}>
+      <Toolbar sx={{ gap: { xs: .5, sm: 1 }, px: { xs: 1, sm: 3 } }}>
         <Box sx={{ lineHeight: 0 }}><Mark size={22} /></Box>
-        <Typography variant="bodyStrong" sx={{ mr: 'auto' }}>FileHarbor</Typography>
+        <Typography variant="bodyStrong" sx={{ mr: 'auto', display: { xs: 'none', sm: 'block' } }}>FileHarbor</Typography>
+        <Button variant="outlined" startIcon={<TaskAlt />} onClick={() => tasks?.open()} sx={{ ml: { xs: 'auto', sm: 0 }, minHeight: 44, flexShrink: 0, bgcolor: tasks?.activeCount ? 'action.selected' : undefined }}>
+          {t('tasks.title')}
+          {tasks?.failed ? <Box component="span" sx={{ ml: 1 }} aria-label={t('error.job_unavailable')}>!</Box> : tasks?.loading ? <CircularProgress size={14} sx={{ ml: 1 }} /> : Boolean(tasks?.activeCount) && <Box component="span" sx={{ ml: 1, px: .75, borderRadius: 1, bgcolor: 'primary.main', color: 'primary.contrastText', fontVariantNumeric: 'tabular-nums' }}>{tasks?.activeCount}</Box>}
+        </Button>
         <Tooltip title={t('recycleBin.title')}>
           <IconButton aria-label={t('recycleBin.title')} onClick={() => setRecycleBinOpen(true)}><DeleteOutline /></IconButton>
         </Tooltip>

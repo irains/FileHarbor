@@ -61,7 +61,7 @@ test.describe('Go service integration', () => {
     await page.goto('/d/service-fixture');
     await expect(page.getByRole('heading', { name: 'Welcome back' })).toBeVisible();
     await page.getByLabel('Username').fill(username!);
-    await page.getByLabel('Password').fill(password!);
+    await page.locator('input[name="password"][type="password"]').fill(password!);
     await page.getByRole('checkbox', { name: 'Keep me signed in for 30 days' }).check();
     await page.getByRole('button', { name: 'Sign in' }).click();
 
@@ -110,7 +110,7 @@ test.describe('Go service integration', () => {
     await page.goto('/d/service-fixture');
     await expect(page.getByRole('heading', { name: 'Welcome back' })).toBeVisible();
     await page.getByLabel('Username').fill(username!);
-    await page.getByLabel('Password').fill(password!);
+    await page.locator('input[name="password"][type="password"]').fill(password!);
     await page.getByRole('button', { name: 'Sign in' }).click();
 
     await page.getByRole('button', { name: 'New file' }).click();
@@ -164,7 +164,7 @@ test.describe('Go service integration', () => {
     await page.goto('/d/service-fixture');
     await expect(page.getByRole('heading', { name: 'Welcome back' })).toBeVisible();
     await page.getByLabel('Username').fill(username!);
-    await page.getByLabel('Password').fill(password!);
+    await page.locator('input[name="password"][type="password"]').fill(password!);
     await page.getByRole('button', { name: 'Sign in' }).click();
 
     await page.getByRole('button', { name: 'New folder' }).click();
@@ -228,7 +228,7 @@ test.describe('bounded read tools against Go service', () => {
   test('searches descendants and previews a newly created archive without extraction', async ({ page }) => {
     await page.goto('/d/service-fixture');
     await page.getByLabel('Username').fill(username!);
-    await page.getByLabel('Password').fill(password!);
+    await page.locator('input[name="password"][type="password"]').fill(password!);
     await page.getByRole('button', { name: 'Sign in', exact: true }).click();
     await expect(page.getByRole('button', { name: 'seed.txt', exact: true })).toBeVisible();
     await page.getByRole('button', { name: 'Search folders', exact: true }).click();
@@ -258,7 +258,10 @@ test.describe('bounded read tools against Go service', () => {
     const zipped = page.waitForResponse(response => response.request().method() === 'POST' && new URL(response.url()).pathname === '/api/jobs');
     await page.getByRole('menuitem', { name: 'Archive', exact: true }).click();
     expect((await zipped).status()).toBe(202);
-    await expect(page.getByText('Published: service-fixture/' + name + '.zip', { exact: true })).toBeVisible();
+    const archiveTask = page.getByRole('article', { name, exact: true });
+    await expect(archiveTask.getByText('Completed', { exact: true })).toBeVisible();
+    await archiveTask.locator('summary').click();
+    await expect(archiveTask.getByText('service-fixture/' + name + '.zip', { exact: true })).toBeVisible();
     await page.getByRole('button', { name: 'Close', exact: true }).click();
     await page.getByRole('button', { name: `Actions ${name}.zip`, exact: true }).click();
     const preview = page.waitForResponse(response => new URL(response.url()).pathname === '/api/archive/preview');
@@ -277,11 +280,22 @@ test.describe('bounded read tools against Go service', () => {
     const output = `${name}-extracted`;
     await page.getByLabel('Folder name', { exact: true }).fill(output);
     await page.getByRole('button', { name: 'Confirm', exact: true }).click();
-    await expect(page.getByText(`Published: service-fixture/${output}`, { exact: true })).toBeVisible();
+    const extractionTask = page.getByRole('article', { name: `${name}.zip`, exact: true });
+    await expect(extractionTask.getByText('Completed', { exact: true })).toBeVisible();
+    await extractionTask.locator('summary').click();
+    await expect(extractionTask.getByText(`service-fixture/${output}`, { exact: true }).last()).toBeVisible();
     await page.getByRole('button', { name: 'Close', exact: true }).click();
     await page.reload();
     await page.getByRole('button', { name: 'File tasks', exact: true }).click();
-    await expect(page.getByText(`Published: service-fixture/${output}`, { exact: true })).toBeVisible();
+    await expect(extractionTask.getByText('Completed', { exact: true })).toBeVisible();
+    await extractionTask.getByRole('button', { name: 'Remove record' }).click();
+    await extractionTask.getByRole('button', { name: 'Confirm', exact: true }).click();
+    await expect(extractionTask).toHaveCount(0);
+    await page.getByRole('button', { name: 'Close', exact: true }).click();
+    await page.reload();
+    await expect(page.getByRole('link', { name: output, exact: true })).toBeVisible();
+    await page.getByRole('button', { name: 'File tasks', exact: true }).click();
+    await expect(extractionTask).toHaveCount(0);
   });
 });
 
@@ -290,19 +304,26 @@ test.describe('shared favorites against Go service', () => {
   test('shares favorite metadata with a second browser session', async ({ page, browser }) => {
     await page.goto('/d/service-fixture');
     await page.getByLabel('Username').fill(username!);
-    await page.getByLabel('Password').fill(password!);
+    await page.locator('input[name="password"][type="password"]').fill(password!);
     await page.getByRole('button', { name: 'Sign in', exact: true }).click();
-    await page.getByRole('button', { name: 'Favorites', exact: true }).click();
-    await page.getByRole('textbox', { name: 'Display name' }).fill('Service fixture');
+    await expect(page.getByRole('button', { name: 'seed.txt', exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: /^(Favorited|Favorite this folder)$/ })).toBeEnabled();
+    const saved = page.getByRole('button', { name: 'Favorited', exact: true });
+    if (await saved.count()) await saved.click();
     const created = page.waitForResponse(response => response.request().method() === 'POST' && new URL(response.url()).pathname === '/api/favorites');
     await page.getByRole('button', { name: 'Favorite this folder' }).click();
     expect((await created).status()).toBe(200);
+    await page.getByRole('button', { name: 'Favorites', exact: true }).click();
+    await page.getByRole('button', { name: 'Edit name', exact: true }).click();
+    await page.getByRole('textbox', { name: 'Display name' }).fill('Service fixture');
+    await page.getByRole('button', { name: 'Save name', exact: true }).click();
+    await expect(page.getByText('Service fixture', { exact: true })).toBeVisible();
     const context = await browser.newContext();
     try {
       const other = await context.newPage();
       await other.goto(new URL('/', page.url()).href);
       await other.getByLabel('Username').fill(username!);
-      await other.getByLabel('Password').fill(password!);
+      await other.locator('input[name="password"][type="password"]').fill(password!);
       await other.getByRole('button', { name: 'Sign in', exact: true }).click();
       await other.getByRole('button', { name: 'Favorites', exact: true }).click();
       await expect(other.getByText('Service fixture', { exact: true })).toBeVisible();
@@ -318,7 +339,7 @@ test.describe('folder uploads against Go service', () => {
   test('uploads equal filenames into separate nested folders and calculates size', async ({ page }) => {
     await page.goto('/d/service-fixture');
     await page.getByLabel('Username').fill(username!);
-    await page.getByLabel('Password').fill(password!);
+    await page.locator('input[name="password"][type="password"]').fill(password!);
     await page.getByRole('button', { name: 'Sign in', exact: true }).click();
     const folder = `folder-upload-${Date.now()}`;
     await page.getByRole('button', { name: 'Upload', exact: true }).click();

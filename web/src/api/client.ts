@@ -246,7 +246,8 @@ export interface JobRequest {
  listing_token?: string; entries?: Array<{ name: string; version: string }>;
 }
 export const api = {
- getJobs: () => request<{ ok: true; jobs: FileJob[] }>('api/jobs'),
+ getJobs: (signal?: AbortSignal) => request<{ ok: true; jobs: FileJob[] }>('api/jobs', { signal }),
+ removeJob: (id: string) => request<void>(`api/jobs/${encodeURIComponent(id)}`, { method: 'DELETE', headers: csrfHeaders() }),
  createJob: (body: JobRequest) => request<{ ok: true; job: FileJob }>(body.previous ? `api/jobs/${encodeURIComponent(body.previous)}/retry` : 'api/jobs', { method: 'POST', headers: { ...jsonHeaders, ...csrfHeaders(), 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
  cancelJob: (id: string) => request<{ ok: true; job: FileJob }>(`api/jobs/${encodeURIComponent(id)}/cancel`, { method: 'POST', headers: csrfHeaders() }),
   startSizeScan: (path: string, kind: 'directory' | 'trash' = 'directory') => request<{ ok: true; scan: SizeScan }>('api/size-scans', { method: 'POST', headers: { ...jsonHeaders, ...csrfHeaders(), 'Content-Type': 'application/json' }, body: JSON.stringify({ path, kind }) }),

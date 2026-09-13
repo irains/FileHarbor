@@ -27,6 +27,8 @@ type JobManager struct {
 	runningCancel context.CancelFunc
 	root          os.FileInfo
 	rootIdentity  string
+	// Optional persistence fault seam; production uses saveJob.
+	saveHidden func(string, *FileJob) error
 }
 
 func newJobManager(state *RuntimeState) (*JobManager, error) {
@@ -75,14 +77,31 @@ func (manager *JobManager) submit(job *FileJob) (*FileJob, error) {
 	if manager.ctx.Err() != nil || !manager.state.Ready() {
 		return nil, errors.New("job_unavailable")
 	}
-	active, owned := 0, 0
-	for id, existing := range manager.jobs {
+	// Resolve accepted keys before validating previous or collecting old records.
+	for _, existing := range manager.jobs {
 		if existing.Scope == job.Scope && existing.Key == job.Key {
+			if existing.Hidden {
+				return nil, errors.New("job_hidden")
+			}
 			if existing.Kind != job.Kind || existing.Destination != job.Destination || existing.Name != job.Name || existing.Target != job.Target || existing.Previous != job.Previous || !reflect.DeepEqual(existing.Sources, job.Sources) {
 				return nil, errors.New("job_key_conflict")
 			}
 			return existing, nil
 		}
+	}
+	if job.Previous != "" {
+		previous := manager.jobs[job.Previous]
+		if previous == nil || previous.Hidden || previous.Scope != job.Scope || !jobTerminal(previous.State) || previous.Kind != job.Kind || previous.Destination != job.Destination || previous.Name != job.Name || previous.Target != job.Target || len(previous.Sources) != len(job.Sources) {
+			return nil, errors.New("not_found")
+		}
+		for i := range job.Sources {
+			if previous.Sources[i].Path != job.Sources[i].Path {
+				return nil, errors.New("not_found")
+			}
+		}
+	}
+	active, owned := 0, 0
+	for id, existing := range manager.jobs {
 		if !jobTerminal(existing.State) {
 			active++
 			if existing.Scope == job.Scope {
@@ -276,12 +295,56 @@ func (manager *JobManager) execute(ctx context.Context, job *FileJob) error {
 	}
 	return utils.ExecuteFileJob(ctx, job.Kind, job.Sources, job.Destination, job.Name)
 }
+
+// hide holds the same boundary as retry validation/creation. The audit callback
+// uses the requesting principal, since recovered jobs deliberately have no Owner.
+func (manager *JobManager) hide(scope, id string, audit func(string, string) error) error {
+	manager.mu.Lock()
+	defer manager.mu.Unlock()
+	if manager.ctx.Err() != nil || !manager.state.Ready() {
+		return errors.New("job_unavailable")
+	}
+	job := manager.jobs[id]
+	if job == nil || job.Scope != scope {
+		return errors.New("not_found")
+	}
+	if err := audit("attempted", ""); err != nil {
+		return errors.New("audit_unavailable")
+	}
+	if !jobTerminal(job.State) {
+		if err := audit("failed", "job_not_terminal"); err != nil {
+			return errors.New("audit_unavailable")
+		}
+		return errors.New("job_not_terminal")
+	}
+	if !job.Hidden {
+		copy := *job
+		copy.Hidden = true
+		save := manager.saveHidden
+		if save == nil {
+			save = saveJob
+		}
+		if err := save(manager.directory, &copy); err != nil {
+			// Rename may already have committed. Keep the visible in-memory
+			// record, fail closed, and never claim the disk was rolled back.
+			manager.state.SetReady(false)
+			_ = audit("failed", "job_unavailable")
+			return errors.New("job_unavailable")
+		}
+		manager.jobs[id] = &copy
+	}
+	if err := audit("success", ""); err != nil {
+		return errors.New("audit_unavailable")
+	}
+	return nil
+}
+
 func (manager *JobManager) list(scope string) []FileJob {
 	manager.mu.Lock()
 	defer manager.mu.Unlock()
 	result := []FileJob{}
 	for _, job := range manager.jobs {
-		if job.Scope == scope {
+		if job.Scope == scope && !job.Hidden {
 			copy := *job
 			copy.Sources = append([]utils.FileJobSource(nil), job.Sources...)
 			copy.Published = append([]string{}, job.Published...)

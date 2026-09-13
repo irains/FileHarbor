@@ -14,28 +14,32 @@ import (
 )
 
 type FileJob struct {
-	Schema          int                    `json:"schema"`
-	ID              string                 `json:"id"`
-	Owner           string                 `json:"-"`
-	Scope           string                 `json:"scope"`
-	Key             string                 `json:"key"`
-	Previous        string                 `json:"previous,omitempty"`
-	Kind            string                 `json:"kind"`
-	Sources         []utils.FileJobSource  `json:"sources"`
-	Destination     string                 `json:"destination"`
-	Name            string                 `json:"name,omitempty"`
-	Target          utils.ExtractionTarget `json:"target"`
-	State           string                 `json:"state"`
-	Phase           string                 `json:"phase"`
-	Bytes           int64                  `json:"bytes"`
-	Items           int64                  `json:"items"`
-	Published       []string               `json:"published"`
-	Intent          string                 `json:"intent,omitempty"`
-	Stages          []string               `json:"stages,omitempty"`
-	Code            string                 `json:"code,omitempty"`
-	CancelRequested bool                   `json:"cancel_requested"`
-	Created         time.Time              `json:"created"`
-	Updated         time.Time              `json:"updated"`
+	Schema      int                    `json:"schema"`
+	ID          string                 `json:"id"`
+	Owner       string                 `json:"-"`
+	Scope       string                 `json:"scope"`
+	Key         string                 `json:"key"`
+	Previous    string                 `json:"previous,omitempty"`
+	Kind        string                 `json:"kind"`
+	Sources     []utils.FileJobSource  `json:"sources"`
+	Destination string                 `json:"destination"`
+	Name        string                 `json:"name,omitempty"`
+	Target      utils.ExtractionTarget `json:"target"`
+	// Hidden is persisted without changing Updated or recovery evidence. Older
+	// binaries reject this optional field under strict decoding; do not downgrade
+	// while hidden journals remain in the state directory.
+	Hidden          bool      `json:"hidden,omitempty"`
+	State           string    `json:"state"`
+	Phase           string    `json:"phase"`
+	Bytes           int64     `json:"bytes"`
+	Items           int64     `json:"items"`
+	Published       []string  `json:"published"`
+	Intent          string    `json:"intent,omitempty"`
+	Stages          []string  `json:"stages,omitempty"`
+	Code            string    `json:"code,omitempty"`
+	CancelRequested bool      `json:"cancel_requested"`
+	Created         time.Time `json:"created"`
+	Updated         time.Time `json:"updated"`
 }
 
 func jobTerminal(state string) bool {
@@ -46,6 +50,10 @@ func jobTerminal(state string) bool {
 	return false
 }
 func saveJob(directory string, job *FileJob) error {
+	return saveJobWithSync(directory, job, syncRuntimeDirectory)
+}
+
+func saveJobWithSync(directory string, job *FileJob, syncDirectory func(string) error) error {
 	data, err := json.Marshal(job)
 	if err != nil {
 		return err
@@ -83,7 +91,7 @@ func saveJob(directory string, job *FileJob) error {
 	if err = os.Rename(file.Name(), target); err != nil {
 		return err
 	}
-	return syncRuntimeDirectory(directory)
+	return syncDirectory(directory)
 }
 func loadJobs(directory string) (map[string]*FileJob, error) {
 	result := map[string]*FileJob{}
@@ -161,6 +169,9 @@ func loadJobs(directory string) (map[string]*FileJob, error) {
 
 func validateJobRecord(job *FileJob) error {
 	invalid := errors.New("invalid job record")
+	if job.Hidden && !jobTerminal(job.State) {
+		return invalid
+	}
 	if job.Kind != "copy" && job.Kind != "compress" && job.Kind != "extract" {
 		return invalid
 	}

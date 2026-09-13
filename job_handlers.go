@@ -26,6 +26,11 @@ func registerJobRoutes(group *gin.RouterGroup, authManager *auth.Manager, state 
 			c.JSON(503, gin.H{"ok": false, "code": "job_unavailable"})
 			return false
 		}
+		identity, err := jobRootIdentity(state.ManagedRoot)
+		if err != nil || identity != manager.rootIdentity {
+			c.JSON(404, gin.H{"ok": false, "code": "not_found"})
+			return false
+		}
 		return true
 	}
 	group.GET("/api/jobs", func(c *gin.Context) {
@@ -78,6 +83,21 @@ func registerJobRoutes(group *gin.RouterGroup, authManager *auth.Manager, state 
 		}
 		if !isTrashRecordID(request.Key) || (request.Kind != "extract" && request.Kind != "copy" && request.Kind != "compress") {
 			jsonError(c, 400, utils.ErrInvalidPath)
+			return
+		}
+		// Hidden keys remain reserved even when their original inputs no longer
+		// exist. Never turn a replay into a fresh execution or a source error.
+		manager.mu.Lock()
+		hiddenKey := false
+		for _, existing := range manager.jobs {
+			if existing.Scope == manager.scope(authInfo(c).Username) && existing.Key == request.Key && existing.Hidden {
+				hiddenKey = true
+				break
+			}
+		}
+		manager.mu.Unlock()
+		if hiddenKey {
+			c.JSON(http.StatusConflict, gin.H{"ok": false, "code": "job_hidden"})
 			return
 		}
 		if request.Path != "" && len(request.Entries) > 0 || request.Name != "" && utils.ValidateLeafName(request.Name) != nil {
@@ -161,34 +181,14 @@ func registerJobRoutes(group *gin.RouterGroup, authManager *auth.Manager, state 
 			}
 		}
 		scope := manager.scope(authInfo(c).Username)
-		if request.Previous != "" {
-			manager.mu.Lock()
-			previous := manager.jobs[request.Previous]
-			valid := previous != nil && previous.Scope == scope && jobTerminal(previous.State)
-			if valid {
-				valid = previous.Kind == request.Kind && previous.Destination == request.Destination && previous.Name == request.Name && previous.Target == request.Target && len(previous.Sources) == len(sources)
-				if valid {
-					for i := range sources {
-						if previous.Sources[i].Path != sources[i].Path {
-							valid = false
-							break
-						}
-					}
-				}
-			}
-			manager.mu.Unlock()
-			if !valid {
-				c.JSON(404, gin.H{"ok": false, "code": "not_found"})
-				return
-			}
-		}
 		if !requireAudit(c, state, "job.submit", sources[0].Path, 1) {
 			return
 		}
 		job, err := manager.submit(&FileJob{Owner: authInfo(c).Username, Scope: scope, Key: request.Key, Previous: request.Previous, Kind: request.Kind, Sources: sources, Destination: request.Destination, Name: request.Name, Target: request.Target})
 		if err != nil {
-			_ = recordAction(state, c, "job.submit", "failed", sources[0].Path, "job_unavailable", 0)
-			c.JSON(409, gin.H{"ok": false, "code": "job_unavailable"})
+			status, code := jobError(err)
+			_ = recordAction(state, c, "job.submit", "failed", sources[0].Path, code, 0)
+			c.JSON(status, gin.H{"ok": false, "code": code})
 			return
 		}
 		if !finishMutation(c, state, "job.submit", sources[0].Path, 1) {
@@ -198,6 +198,22 @@ func registerJobRoutes(group *gin.RouterGroup, authManager *auth.Manager, state 
 		defer manager.mu.Unlock()
 		c.JSON(http.StatusAccepted, gin.H{"ok": true, "job": publicJob(job)})
 	}
+	group.DELETE("/api/jobs/:id", csrfRequired(authManager), mutationAuditMiddleware(state), func(c *gin.Context) {
+		if !available(c) {
+			return
+		}
+		info := authInfo(c)
+		id := c.Param("id")
+		err := manager.hide(manager.scope(info.Username), id, func(outcome, code string) error {
+			return state.Record(AuditEvent{Event: "job.hide", Outcome: outcome, Principal: info.Username, AuthMethod: "session", ClientIP: c.ClientIP(), JobID: id, Code: code})
+		})
+		if err != nil {
+			status, code := jobError(err)
+			c.JSON(status, gin.H{"ok": false, "code": code})
+			return
+		}
+		c.Status(http.StatusNoContent)
+	})
 	group.POST("/api/jobs", csrfRequired(authManager), mutationAuditMiddleware(state), submit)
 	group.POST("/api/jobs/:id/retry", csrfRequired(authManager), mutationAuditMiddleware(state), submit)
 	group.POST("/api/jobs/:id/cancel", csrfRequired(authManager), mutationAuditMiddleware(state), func(c *gin.Context) {
@@ -207,7 +223,7 @@ func registerJobRoutes(group *gin.RouterGroup, authManager *auth.Manager, state 
 		manager.mu.Lock()
 		defer manager.mu.Unlock()
 		job := manager.jobs[c.Param("id")]
-		if job == nil || job.Scope != manager.scope(authInfo(c).Username) {
+		if job == nil || job.Hidden || job.Scope != manager.scope(authInfo(c).Username) {
 			c.JSON(404, gin.H{"ok": false, "code": "not_found"})
 			return
 		}
@@ -232,6 +248,19 @@ func registerJobRoutes(group *gin.RouterGroup, authManager *auth.Manager, state 
 		}
 		c.JSON(200, gin.H{"ok": true, "job": publicJob(job)})
 	})
+}
+
+func jobError(err error) (int, string) {
+	switch code := err.Error(); code {
+	case "not_found":
+		return http.StatusNotFound, code
+	case "job_hidden", "job_not_terminal", "job_key_conflict", "job_limit":
+		return http.StatusConflict, code
+	case "audit_unavailable":
+		return http.StatusServiceUnavailable, code
+	default:
+		return http.StatusServiceUnavailable, "job_unavailable"
+	}
 }
 
 // Public responses exclude storage scope, idempotency keys and private stages.
