@@ -19,6 +19,7 @@ import {
   MoreVert,
   Refresh,
   SettingsOutlined,
+  ManageSearchOutlined,
   TaskAlt,
   StarBorderOutlined,
   UploadFile
@@ -35,6 +36,7 @@ import {
   CircularProgress,
   Divider,
   IconButton,
+  InputAdornment,
   ListItemIcon,
   Menu,
   MenuItem,
@@ -493,9 +495,16 @@ export function Workspace() {
               placeholder={t('workspace.searchPlaceholder')}
               value={searchQuery}
               onChange={(event) => updateListingControls(() => setSearchQuery(event.target.value))}
-              slotProps={{ htmlInput: { type: 'search' } }}
+              sx={{ minWidth: 0 }}
+              slotProps={{
+                htmlInput: { type: 'search' },
+                input: {
+                  endAdornment: <InputAdornment position="end" sx={{ ml: 0.5 }}>
+                    <Button variant="text" color="inherit" size="small" startIcon={<ManageSearchOutlined />} onClick={() => setSearchOpen(true)} sx={{ minHeight: 44, px: 1, flexShrink: 0, whiteSpace: 'nowrap', color: 'text.secondary', boxShadow: 'none', '&:hover': { boxShadow: 'none' } }}>{t('searchPanel.title')}</Button>
+                  </InputAdornment>
+                }
+              }}
             />
-            <Button sx={{ flexShrink: 0, minHeight: 44 }} onClick={() => setSearchOpen(true)}>{t('searchPanel.title')}</Button>
             <TextField
               select
               size="small"

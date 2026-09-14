@@ -510,3 +510,35 @@ for (const width of [320, 390, 768, 1024, 1280]) {
     if (width === 390 || width === 768) await page.screenshot({ path: `test-results/workspace-heading-${width}.png` });
   });
 }
+
+for (const width of [320, 390, 768, 1280]) {
+  for (const language of ['en', 'zh'] as const) {
+    test(`cross-folder search stays inside the search field at ${width}px in ${language}`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 900 });
+      await mockWorkspaceApi(page);
+      await page.goto('/');
+      if (language === 'zh') {
+        await page.getByRole('button', { name: 'Settings', exact: true }).click();
+        await page.getByRole('radio', { name: '简体中文', exact: true }).click();
+        await page.getByRole('button', { name: '关闭', exact: true }).click();
+      }
+      const label = language === 'zh' ? '跨目录搜索' : 'Search folders';
+      const search = page.getByRole('searchbox');
+      const field = search.locator('..');
+      const entry = field.getByRole('button', { name: label, exact: true });
+      await expect(entry).toBeVisible();
+      await search.fill('sample');
+      const inputBox = await search.boundingBox();
+      const buttonBox = await entry.boundingBox();
+      const fieldBox = await field.boundingBox();
+      expect(inputBox!.width).toBeGreaterThan(65);
+      expect(buttonBox!.height).toBeGreaterThanOrEqual(44);
+      expect(buttonBox!.x).toBeGreaterThanOrEqual(inputBox!.x + inputBox!.width);
+      expect(buttonBox!.x + buttonBox!.width).toBeLessThanOrEqual(fieldBox!.x + fieldBox!.width);
+      expect(await page.locator('body').evaluate(body => body.scrollWidth <= body.clientWidth)).toBe(true);
+      await page.screenshot({ path: `test-results/search-entry-${language}-${width}.png` });
+      await entry.click();
+      await expect(page.getByRole('heading', { name: label, exact: true })).toBeVisible();
+    });
+  }
+}
